@@ -9,6 +9,7 @@ context: |
   и звёздной карты специалистов (роли, компетенции, Bus Factor).
   Данные: dataset/*.csv - нормализованный датасет из xlsx, см. README.
   Стек: Python 3.13 + uv (pandas/openpyxl) в scripts/, openspec для спеков.
+  Commits: conventional commits "тип(scope): описание" (см. AGENTS.md и README).
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
