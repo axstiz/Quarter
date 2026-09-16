@@ -29,6 +29,7 @@ def _uid() -> str:
 class TaskORM(Base):
     __tablename__ = "tasks"
     task_id: Mapped[str] = mapped_column(String, primary_key=True)
+    source: Mapped[str] = mapped_column(String, default="imported")
     parent_id: Mapped[str | None] = mapped_column(String, nullable=True)
     team_id: Mapped[str] = mapped_column(String, index=True)
     summary: Mapped[str] = mapped_column(String, default="")
@@ -40,6 +41,7 @@ class TaskORM(Base):
 
 class RoleRequirementORM(Base):
     __tablename__ = "task_role_requirements"
+    source: Mapped[str] = mapped_column(String, default="imported")
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
     task_id: Mapped[str] = mapped_column(String, index=True)
     role: Mapped[str] = mapped_column(String)
@@ -48,6 +50,7 @@ class RoleRequirementORM(Base):
 
 class DependencyORM(Base):
     __tablename__ = "task_dependencies"
+    source: Mapped[str] = mapped_column(String, default="imported")
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
     blocking_task_id: Mapped[str] = mapped_column(String, index=True)
     blocked_task_id: Mapped[str] = mapped_column(String, index=True)
@@ -56,6 +59,7 @@ class DependencyORM(Base):
 
 class EngineerORM(Base):
     __tablename__ = "engineers_profiles"
+    source: Mapped[str] = mapped_column(String, default="imported")
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
     engineer_id: Mapped[str] = mapped_column(String, index=True)
     team_id: Mapped[str] = mapped_column(String, index=True)
@@ -67,11 +71,19 @@ class EngineerORM(Base):
 
 class TeamHistoryORM(Base):
     __tablename__ = "team_history"
+    source: Mapped[str] = mapped_column(String, default="imported")
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
     snapshot_date: Mapped[date] = mapped_column(Date)
     team_id: Mapped[str] = mapped_column(String, index=True)
     velocity_achieved: Mapped[float] = mapped_column(Float)
     planned_sp: Mapped[float] = mapped_column(Float)
+
+
+class TeamORM(Base):
+    __tablename__ = "teams"
+    team_id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, default="")
+    source: Mapped[str] = mapped_column(String, default="manual")
 
 
 class PlanORM(Base):

@@ -16,6 +16,9 @@ dependencies = [
     "pytest>=8,<9",
     "pytest-asyncio>=0.24,<2",
     "httpx>=0.28,<1",
+    "python-multipart>=0.0.9,<1",
+    "langgraph>=0.2,<1",
+    "gigachat>=0.1,<1",
 ]
 
 [tool.uv]

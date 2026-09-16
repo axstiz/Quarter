@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import tempfile
+import uuid
+
 from collections import defaultdict
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -174,6 +179,89 @@ async def data_import(session: AsyncSession = Depends(get_session)) -> dict:
     await reset_dataset_tables(session)
     counts = await import_dataset(session, settings.dataset_dir)
     return {"status": "imported", "counts": counts}
+
+
+# --- онбординг (change 002): upload → job → answers → confirm ----------
+
+JOBS_TMP_DIR = Path(tempfile.gettempdir()) / "planner-uploads"
+JOBS_TMP_DIR.mkdir(exist_ok=True)
+
+
+@router.post("/data/upload", status_code=201)
+async def data_upload(file: UploadFile = File(...)) -> dict:
+    """Загрузка файла xlsx/csv/json в пайплайн normalization."""
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in (".xlsx", ".csv", ".json"):
+        raise HTTPException(status_code=422, detail=f"поддерживаются xlsx/csv/json, получен {suffix}")
+    dest = JOBS_TMP_DIR / f"{uuid.uuid4().hex}{suffix}"
+    dest.write_bytes(await file.read())
+    from src.ai.pipelines.normalization import new_job, UploadJob
+
+    try:
+        job = new_job(file.filename or dest.name, dest)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"не удалось разобрать файл: {e}")
+    return job.snapshot()
+
+
+@router.get("/data/jobs/{job_id}")
+async def job_status(job_id: str) -> dict:
+    from src.ai.pipelines.normalization import UploadJob
+
+    job = UploadJob.JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job не найден")
+    return job.snapshot()
+
+
+@router.post("/data/jobs/{job_id}/answers")
+async def job_answers(job_id: str, body: dict) -> dict:
+    """Ответы на вопросы маппинга: {колонка: "entity.field" | "пропустить"}"""
+    from src.ai.pipelines.normalization import UploadJob, run_stage
+
+    job = UploadJob.JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job не найден")
+    answers = body.get("answers", {})
+    try:
+        run_stage(job, answers)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return job.snapshot()
+
+
+@router.post("/data/jobs/{job_id}/confirm")
+async def job_confirm(job_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+    """Импорт в БД с merge-правилами (manual не затирается)."""
+    from src.ai.pipelines.normalization import UploadJob
+    from src.db.staging import stage_import
+
+    job = UploadJob.JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job не найден")
+    if job.status != "ready":
+        raise HTTPException(status_code=409, detail=f"job не готов ({job.status})")
+    try:
+        counts = await stage_import(session, job)
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=f"ошибка импорта: {e}")
+    job.status = "confirmed"
+    return {"status": "confirmed", "counts": counts}
+
+
+@router.post("/ai/normalize/{job_id}")
+async def ai_rerun(job_id: str) -> dict:
+    """Повторный прогон пайплайна (после ответов или без них)."""
+    from src.ai.pipelines.normalization import UploadJob, run_stage
+
+    job = UploadJob.JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job не найден")
+    run_stage(job)
+    return job.snapshot()
+
+
 
 
 @router.post("/plans/{plan_id}/sprints/{sprint_no}/facts")
