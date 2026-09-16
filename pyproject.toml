@@ -1,0 +1,12 @@
+[project]
+name = "postcode-planner"
+version = "0.1.0"
+description = "Квартальное планирование команд и звёздная карта (PostCode Challenge)"
+requires-python = ">=3.13"
+dependencies = [
+    "openpyxl>=3.1,<4",
+    "pandas>=2.2,<3",
+]
+
+[tool.uv]
+package = false
