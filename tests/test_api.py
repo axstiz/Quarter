@@ -16,8 +16,14 @@ def anyio_backend():
 @pytest_asyncio.fixture()
 async def client(tmp_path, monkeypatch):
     monkeypatch.setenv("POSTCODE_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 't.db'}")
-    from src.db.session import SessionLocal, engine, init_db
-    from src.db import session as session_mod
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from src.core.config import settings
+    import src.db.session as session_mod
+
+    # каждый тест получает свой engine под свой tmp-DSN
+    session_mod.engine = create_async_engine(settings.database_url, echo=False)
+    session_mod.SessionLocal = async_sessionmaker(session_mod.engine, expire_on_commit=False)
+    from src.db.session import init_db
     from src.core.config import settings
 
     settings.dataset_dir = ROOT / "dataset"
@@ -26,7 +32,7 @@ async def client(tmp_path, monkeypatch):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         yield ac
-    await engine.dispose()
+    await session_mod.engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -98,3 +104,50 @@ async def test_data_import_counts(client):
     assert counts["tasks"] == 45
     assert counts["role_requirements"] == 307
     assert counts["team_history"] == 12
+
+
+@pytest.mark.asyncio
+async def test_plans_versions_and_facts(client, sample_xlsx):
+    """Change 002b: GET /plans (версии), GET /plans/{id}/facts, parent_plan_id в GET plans/{id}."""
+    r = await client.post("/api/v1/data/upload", files={"file": ("d.xlsx", sample_xlsx.read_bytes())})
+    assert r.status_code == 201
+    body = r.json()
+    job_id = body["job_id"]
+    r = await client.post(f"/api/v1/data/jobs/{job_id}/confirm")
+    assert r.status_code == 200
+
+    r = await client.post("/api/v1/plans/generate")
+    pid = r.json()["plan_id"]
+
+    r = await client.get("/api/v1/plans")
+    assert r.status_code == 200
+    plans = r.json()
+    assert len(plans) == 1 and plans[0]["is_initial"]
+
+    r = await client.post(f"/api/v1/plans/{pid}/sprints/1/facts", json={"completed_sp": 10.0, "completed_task_ids": []})
+    assert r.status_code == 200
+    new_pid = r.json()["new_plan_id"]
+    assert new_pid != pid
+
+    r = await client.get("/api/v1/plans")
+    plans = r.json()
+    assert len(plans) == 2
+    child = next(p for p in plans if p["plan_id"] == new_pid)
+    assert not child["is_initial"] and child["parent_plan_id"] == pid
+
+    r = await client.get(f"/api/v1/plans/{new_pid}/facts")
+    assert r.status_code == 200
+    facts = r.json()
+    assert len(facts) == 1 and facts[0]["sprint_no"] == 1 and facts[0]["completed_sp"] == 10.0
+
+    r = await client.get(f"/api/v1/plans/{new_pid}")
+    assert r.status_code == 200
+    assert r.json()["parent_plan_id"] == pid
+
+
+@pytest.fixture()
+def sample_xlsx():
+    from pathlib import Path as _P
+    xlsx = _P(__file__).resolve().parent.parent / "Датасет_с_правками_основной.xlsx"
+    assert xlsx.exists()
+    return xlsx

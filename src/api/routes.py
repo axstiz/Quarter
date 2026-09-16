@@ -182,6 +182,9 @@ async def get_plan(plan_id: str, session: AsyncSession = Depends(get_session)) -
         return base
     return {
         "plan_id": plan_id,
+        "parent_plan_id": plan_orm.parent_plan_id,
+        "is_initial": plan_orm.is_initial,
+        "recomputed_after_sprint": plan_orm.recomputed_after_sprint,
         "sprints": [{"sprint_no": s.sprint_no,
                      "tasks": [_with_task(i) for i in s.items]}
                     for s in plan.sprints],
@@ -552,6 +555,45 @@ async def teams(session: AsyncSession = Depends(get_session)) -> list[dict]:
     return teams_overview(engineers)
 api_router = router
 
+
+
+# --- версии планов и история фактов (change 002b) -----------------------
+
+@router.get("/plans")
+async def plans_list(session: AsyncSession = Depends(get_session)) -> list[dict]:
+    """Все версии планов (цепочка снапшотов: initial → recompute)."""
+    rows = (await session.execute(select(PlanORM).order_by(PlanORM.created_at))).scalars().all()
+    out = []
+    for r in rows:
+        out.append({
+            "plan_id": r.plan_id,
+            "is_initial": r.is_initial,
+            "parent_plan_id": r.parent_plan_id,
+            "recomputed_after_sprint": r.recomputed_after_sprint,
+            "created_at": str(r.created_at),
+        })
+    return out
+
+
+@router.get("/plans/{plan_id}/facts")
+async def facts_list(plan_id: str, session: AsyncSession = Depends(get_session)) -> list[dict]:
+    """Факты спринтов по всей цепочке версии (root → current)."""
+    chain_ids = {plan_id}
+    cur = plan_id
+    while True:
+        orm = await get_plan_orm(session, cur)
+        if not orm or not orm.parent_plan_id or orm.parent_plan_id in chain_ids:
+            break
+        chain_ids.add(orm.parent_plan_id)
+        cur = orm.parent_plan_id
+    facts = (await session.execute(select(SprintFactORM).where(
+        SprintFactORM.plan_id.in_(chain_ids)))).scalars().all()
+    return [{
+        "sprint_no": f.sprint_no,
+        "completed_sp": f.completed_sp,
+        "completed_task_ids": f.completed_task_ids or [],
+        "notes": f.notes,
+    } for f in sorted(facts, key=lambda x: x.sprint_no)]
 
 
 # --- ручки-источники для фронтенда (change 002b) ------------------------
