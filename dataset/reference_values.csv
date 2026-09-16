@@ -1,0 +1,20 @@
+value_type,value
+development_outcome,"Итог разработки, выбирается заказчиком и исполнителем на этапе планирования"
+development_outcome,1. Аналитика и архитектура выполнены частично
+development_outcome,2. Аналитика и архитектура завершены
+development_outcome,"3. Функционал реализован частично, работы будут продолжены"
+development_outcome,4. Функционал реализован и готов к ИТ
+development_outcome,5. Функционал реализован и перенесен в опытную эксплуатацию
+development_outcome,6. Функционал реализован и перенесен в промышленную эксплуатацию
+development_outcome,не будет взято в квартал
+development_outcome,Отменено зака
+deviation_reason,Причины расхождения планов заказчика и исполнителя
+deviation_reason,Не оценивалась
+deviation_reason,Отсутствие ресурсов
+deviation_reason,Отсутствует готовность смежных команд
+deviation_reason,Превышение плана
+deviation_reason,Изменились требования
+closure_result,Результаты работ при закрытии задачи
+closure_result,планируемый результат работ достигнут
+closure_result,планируемый результат работ НЕ достигнут
+closure_result,Работы отменены/перенесены заказчиком
