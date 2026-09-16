@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Commit-msg: проверка Conventional Commits.
+# Формат: "тип: описание" или "тип(scope): описание"
+# Типы: feat fix docs refactor test chore ci build perf spec data revert
+set -euo pipefail
+
+msg="$(grep -vE '^(#|[[:space:]]*$)' "$1" | head -1 | sed 's/[[:space:]]*$//')"
+
+re='^(feat|fix|docs|refactor|test|chore|ci|build|perf|spec|data|revert)(\([A-Za-z0-9_./-]+\))?: .{4,160}$'
+if ! printf '%s' "$msg" | grep -Eq "$re"; then
+    cat <<EOF >&2
+commit отклонён: "$msg"
+Соглашение (conventional commits): "тип(scope): краткое описание"
+Типы: feat fix docs refactor test chore ci build perf spec data revert
+Пример: feat(planning): распределение задач по спринтам
+EOF
+    exit 1
+fi
