@@ -1,93 +1,118 @@
-# template-gitlab-8c0dabb4
+# PostCode Challenge: квартальное планирование команд и звёздная карта
 
-Template for task: GitLab репозиторий
+Сервис квартального планирования работ команд разработки и «звёздной карты» специалистов — решение по [заданию PostCode.md](задание%20PostCode.md).
 
-## Getting started
+## Быстрый старт
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+Требования: [uv](https://docs.astral.sh/uv/) (/manage управляет Python сам), Node.js 22+ (для openspec).
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+```bash
+# окружение + зависимости (Python 3.13)
+uv sync
 
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
-
-```
-cd existing_repo
-git remote add origin https://git.codenrock.com/codenrock/khakaton-postcode-challenge-ot-pochtatekha/template-gitlab-8c0dabb4.git
-git branch -M main
-git push -uf origin main
+# пересборка dataset/ из исходного xlsx
+uv run scripts/split_dataset.py
 ```
 
-## Integrate with your tools
+## Структура репозитория
 
-- [ ] [Set up project integrations](https://git.codenrock.com/codenrock/khakaton-postcode-challenge-ot-pochtatekha/template-gitlab-8c0dabb4/-/settings/integrations)
+```
+dataset/                     нормализованные данные (CSV, UTF-8)
+scripts/split_dataset.py     конвертор xlsx -> dataset/*.csv
+openspec/                    спецификации (openspec)
+задание PostCode.md          условие хакатона
+Датасет_с_правками_основной.xlsx   исходные данные
+Демо_онбординг.pdf           демо онбординга
+```
 
-## Collaborate with your team
+## Датасет
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+Источник — `Датасет_с_правками_основной.xlsx`, лист «Датасет(обновленный)». В нём несколько таблиц последовательно накатаны на один лист; разделитель — титульные строки. Каждая таблица выгружена в отдельный CSV (данные до первой пустой строки внутри блока). Все преобразования выполняются только скриптом `scripts/split_dataset.py`, ручные правки не требуются.
 
-## Test and Deploy
+| Файл | Содержимое | Строк |
+|---|---|---|
+| `tasks.csv` | 45 задач: стандартные поля задачи, Story Points, статусы, даты, плановые/итоговые результаты | 45 |
+| `task_role_hours.csv` | фактически затраченное время по ролям для 6 задач (данные в листе есть только для них) | 6 |
+| `task_role_requirements.csv` | потребность в часах по ролям для каждой задачи (long-формат: `role, task_id, hours`); нулевые строки отброшены | 307 |
+| `task_dependencies.csv` | 16 зависимостей между задачами (тип: `has to be done before` / `is required for` / `depends on`) | 16 |
+| `engineers_profiles.csv` | 34 инженера: команда, роль, грейд, компетенции, занятость (capacity_rate) | 34 |
+| `team_history.csv` | история velocity спринтов по 5 командам | 12 |
+| `reference_values.csv` | справочники: итоги разработки, причины расхождения планов, результаты закрытия задач | 19 |
 
-Use the built-in continuous integration in GitLab.
+### Преобразования и допущения
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+1. **Даты**: Excel-serial (`45995.514…`, от 1899-12-30) или строки с временем → `YYYY-MM-DD`. Время отбрасывается — планирование ведётся по дням.
+2. **Колонки**: renamed в snake_case на английском, где совпадают смыслы, с сохранением русских заголовков ролей. Пример переименований: `Номер инициативы → initiative_no`, `плановый результат → planned_result`, `будет включено в спринт → planned_in_sprint`.
+3. **`task_dependencies.csv`**: в исходном xlsx заголовки `blocked_task_id`/`dependency_type` смещены на одну колонку вправо относительно данных; сопоставление сделано по позициям (`blocking_task_id, blocked_task_id, dependency_type`), имена в CSV корректны.
+4. **Инженеры в нескольких командах**: ENG-405, ENG-406, ENG-419, ENG-426 имеют по две записи (0.5 ставки в каждой) — записи оставлены как есть, логика доступности учитывает обе части.
+5. **Пропуски**: пустые ячейки → пустая строка в CSV (`planned_in_sprint`, `customer_result` и т. п. для `ToDo/InProgress` задач); в строках без дат в `*_date` колонках — пустая строка.
+6. **`task_role_hours.csv`**: заполнен только для 6 из 45 задач (для остальных в исходных данных нет фактических разбивок по ролям) — используется для расчёта фактической производительности по ролям.
+7. Числа хранятся без разделителей и окончаний (истинные целые — как ints, дробные — с точкой); `capacity_rate` — дробь (0.5 / 1.0).
 
-***
+## openspec (для команды)
 
-# Editing this README
+Спецификации для командной работы с AI-агентами — в папке [openspec/](openspec).
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+```bash
+npm i -g @fission-ai/openspec   # раз (префикс npm в NixOS: npm config set prefix ~/.npm-global)
+openspec validate               # проверка спеков
+```
 
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+Workflow: `/opsx-propose "идея"` → ревью → `/opsx-apply` → `/opsx-archive`. См [.opencode/](.opencode) — команды для OpenCode.
 
 ## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+1. Ветка от `main` — один короткий префикс (`feat/`, `fix/`, `spec/`).
+2. Изменения сферы (service behavior) — через openspec change proposal (`/opsx-propose`), не напрямую в `openspec/specs`.
+3. Перед MR: `openspec validate`, пересборка датасета (`uv run scripts/split_dataset.py`) должна сходиться по числу строк с README.
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### Роли в команде
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+| Роль | Что делает |
+|---|---|
+| Тимлид | ревьюит proposal.md и дельту спеки в MR (approve/reject), принимает решения в спорах, следит за `openspec/changes/` |
+| Разработчик | `/opsx-propose "идея"` → правит proposal по ревью → `/opsx-apply` → MR с кодом |
+| AI-агент (OpenCode) | оформляет proposal, пишет код по tasks.md, вливает дельту спеки в `/opsx-archive`. Всё общение в чат агенту |
 
-## License
-For open source projects, say how it is licensed.
+Правило: **MR с кодом, меняющим поведение сервиса, без Change ID = reject.**
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+### Полный цикл изменения
+
+```
+1. /opsx-propose "что делаем"      агент создаёт change (proposal.md + tasks.md + дельта спеки)
+2. MR с change → ревью лидом       код ещё не пишется
+3. /opsx-apply                     агент делает tasks.md, отмечает пункты
+4. MR с кодом → ревью → merge
+5. /opsx-archive                   дельта вливается в specs/, change уходит в архив
+```
+
+Спека (`openspec/specs/`) — контракт уже согласованного поведения; меняется последней, через `archive`.
+
+### Соглашение по коммитам
+
+Conventional Commits: `тип(scope): описание` (кратко, по-русски, строчными). Scope — имя capability спеки или модуль (`dataset`, `data`, `ui`), необязателен, но приветствуется.
+
+| Тип | Когда |
+|---|---|
+| `feat` | новая функциональность сервиса |
+| `fix` | исправление бага |
+| `spec` | изменение спек openspec (proposal/архив) |
+| `data` | правки источника данных xlsx / скрипта разборки / перегенерация dataset |
+| `docs` | только документация |
+| `refactor`, `test`, `chore`, `ci`, `build`, `perf`, `revert` | стандартно |
+
+Примеры: `data: нормализация дат в ISO`, `feat(planning): распределение по спринтам`, `spec: уточнение объяснения переноса задач`.
+
+### Хуки (контроль локально, CI в проекте отключён)
+
+Хуки лежат в `.githooks/`; включаются один раз после клонирования:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+- `commit-msg` — отклоняет коммиты не по соглашению
+- `pre-commit` — `openspec validate --all` + синтаксис `scripts/`
+- `pre-push` — полная проверка перед пушем: validate спеков + воспроизводимость `dataset/` из xlsx
+
+`.gitlab-ci.yml` оставлен как заготовка для будущего включения CI (валидатор спеков и воспроизводимость данных на MR).
