@@ -113,9 +113,12 @@ def map_row(row: dict[str, str]) -> tuple[dict[str, dict[str, str]], list[str]]:
         mapped.setdefault(entity, {})[field] = value
     if role_name and "role_requirement" in mapped and isinstance(mapped["role_requirement"].get("rows"), dict):
         mapped["role_requirement"]["role"] = role_name
-    # team_id: если в строке есть team_history/dependency поля — belongs туда, не task
+    # team_id: если в строке есть team_history/dependency поля — тузов не туда, не task
     if "team_history" in mapped and "team_id" in mapped.get("task", {}):
         mapped["team_history"]["team_id"] = mapped["task"].pop("team_id")
+    # engineer-линии: team_id принадлежит инженеру
+    if "engineer" in mapped and "team_id" in mapped.get("task", {}):
+        mapped["engineer"]["team_id"] = mapped["task"].pop("team_id")
     if "dependency" in mapped and "team_id" in mapped.get("task", {}):
         mapped["task"]["team_id"]
         mapped["task"].pop("team_id", None)

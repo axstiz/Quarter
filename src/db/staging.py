@@ -164,7 +164,7 @@ async def stage_import(session: AsyncSession, job) -> dict[str, int]:
 
     n_req = 0
     for rr in role_reqs:
-        if isinstance(rr.get("rows"), dict) and rr.get("role"):
+        if isinstance(rr.get("rows"), dict) and rr.get("role") and not str(rr["role"]).lower().startswith("итого"):
             for tid, hours in rr["rows"].items():
                 hours_num = _f(str(hours or ""))
                 if hours_num <= 0 or not tid:

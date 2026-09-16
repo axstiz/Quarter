@@ -41,16 +41,31 @@ def read_xlsx(path: Path) -> list[list[dict[str, str]]]:
             blocks.append(cur)
         for block in blocks:
             cleaned = [[_clean(v) for v in row] for row in block]
-            # первая строка блока = заголовок, если вторая похожа на данные;
-            # иначе первая строка — титул секции, вторая — заголовок
             if len(block) >= 2:
                 first_non_empty = sum(1 for c in block[0] if c)
                 second_non_empty = sum(1 for c in block[1] if c)
                 if first_non_empty <= 1 and second_non_empty > first_non_empty:
-                    tables.append(_rows_from_dicts(block[1], block[2:]))
+                    tables.append(_dependency_aligned(block[1], cleaned[2:]))
                     continue
-            tables.append(_rows_from_dicts(block[0], block[1:]))
+            tables.append(_dependency_aligned(block[0], cleaned[1:]))
     return tables
+
+
+def _dependency_aligned(header, payload: list[list[str]]) -> list[dict]:
+    """Фиксирует типовой сдвиг headers dependency-блоков: заголовок col2 в xlsx
+    пустой, а данные лежат позиционно [blocking, blocked, type]."""
+    headers = [_clean(h) for h in header]
+    if (len(headers) >= 4 and not headers[1]
+            and headers[0].lower().startswith("blocking")
+            and any(len(r) > 2 and r[2] for r in payload)):
+        headers = ["blocking_task_id", "blocked_task_id", "dependency_type"] + [
+            h for h in headers[3:] if h and h not in ("blocking_task_id", "blocked_task_id", "dependency_type")]
+        # первый элемент строк — первая таблица значений
+    rows = []
+    for row in payload:
+        if any(v for v in row):
+            rows.append(dict(zip(headers, row)))
+    return rows
 
 
 def read_csv(path: Path) -> list[list[dict[str, str]]]:

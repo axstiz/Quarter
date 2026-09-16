@@ -163,12 +163,27 @@ async def get_plan(plan_id: str, session: AsyncSession = Depends(get_session)) -
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
     items = await get_plan_items(session, plan_id)
     plan = _plan_from_orm(plan_id, items)
+    tasks, engineers, history, deps = await load_world(session)
+    def _with_task(i) -> dict:
+        task = tasks.get(i.task_id)
+        base = i.model_dump()
+        base.update({
+            "task_id": i.task_id,
+            "summary": task.summary if task else "",
+            "parent_id": task.parent_id if task else None,
+            "estimation_sp": task.estimation_sp if task else 0.0,
+            "estimated_hh": task.estimated_hh if task else 0.0,
+            "planned_in_sprint": (task.status != "Done") if task else False,
+            "team_id": task.team_id if task else "",
+            "role_hours": task.role_hours if task else {},
+        })
+        return base
     return {
         "plan_id": plan_id,
         "sprints": [{"sprint_no": s.sprint_no,
-                     "tasks": [i.dict(exclude={"task_id": True}) | {"task_id": i.task_id} for i in s.items]}
+                     "tasks": [_with_task(i) for i in s.items]}
                     for s in plan.sprints],
-        "not_planned": [d.dict() for d in plan.decisions],
+        "not_planned": [d.model_dump() for d in plan.decisions],
     }
 
 
@@ -438,3 +453,101 @@ async def teams(session: AsyncSession = Depends(get_session)) -> list[dict]:
 
     return teams_overview(engineers)
 api_router = router
+
+
+
+# --- ручки-источники для фронтенда (change 002b) ------------------------
+
+@router.get("/tasks")
+async def tasks_list(team_id: str | None = None, status: str | None = None,
+                     search: str | None = None,
+                     session: AsyncSession = Depends(get_session)) -> list[dict]:
+    tasks, engineers, history, deps = await load_world(session)
+    dep_map: dict[str, list[dict]] = defaultdict(list)
+    for blocking, blocked in deps:
+        dep_map[blocked].append({"blocking_task_id": blocking})
+    out = []
+    for tid, task in tasks.items():
+        if team_id and task.team_id != team_id:
+            continue
+        if status and task.status.lower() != status.lower():
+            continue
+        if search and search.lower() not in (task.summary or "").lower():
+            continue
+        out.append({
+            "task_id": tid, "parent_id": task.parent_id, "team_id": task.team_id,
+            "summary": task.summary, "status": task.status,
+            "estimation_sp": task.estimation_sp, "estimated_hh": task.estimated_hh,
+            "role_hours": task.role_hours,
+            "blocks": [d for d in deps if d[0] == tid],
+            "blocked_by": [b for b in dep_map.get(tid, [])],
+        })
+    return sorted(out, key=lambda x: x["task_id"])
+
+
+@router.get("/tasks/{task_id}")
+async def task_detail(task_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+    tasks, engineers, history, deps = await load_world(session)
+    task = tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="задача не найдена")
+    return task.model_dump() | {
+        "blocks": [d for d in deps if d.task_id == task_id][0] if False else [b for a, b in deps if a == task_id],
+        "blocked_by": [a for a, b in deps if b == task_id],
+    }
+
+
+@router.get("/engineers")
+async def engineers_list(team_id: str | None = None, role: str | None = None,
+                          grade: str | None = None, skill: str | None = None,
+                          min_rate: float | None = None,
+                          session: AsyncSession = Depends(get_session)) -> list[dict]:
+    tasks, engineers, history, deps = await load_world(session)
+    out = []
+    for e in engineers:
+        if team_id and e.team_id != team_id:
+            continue
+        if role and role.lower() not in e.role.lower():
+            continue
+        if grade and grade.lower() != e.grade.lower():
+            continue
+        if min_rate is not None and e.capacity_rate < min_rate:
+            continue
+        if skill and skill.lower() not in e.skills_declared.lower():
+            continue
+        out.append(e.model_dump())
+    return out
+
+
+@router.get("/engineers/{engineer_id}")
+async def engineer_detail(engineer_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+    from src.services.starmap import engineer_profile
+
+    tasks, engineers, history, deps = await load_world(session)
+    profile = engineer_profile(engineers, engineer_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="не найден")
+    return profile
+
+
+@router.get("/dependencies")
+async def dependencies_list(session: AsyncSession = Depends(get_session)) -> list[dict]:
+    tasks, engineers, history, deps = await load_world(session)
+    return [{"blocking_task_id": a, "blocked_task_id": b} for a, b in deps]
+
+
+@router.get("/teams/{team_id}")
+async def team_detail(team_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+    tasks, engineers, history, deps = await load_world(session)
+    from src.services.capacity import team_capacity_sp
+
+    members = [e for e in engineers if e.team_id == team_id]
+    hist = [h for h in history if h.team_id == team_id]
+    if not members and not hist:
+        raise HTTPException(status_code=404, detail="команда не найдена")
+    return {
+        "team_id": team_id,
+        "members": [e.model_dump() for e in members],
+        "capacity_sp_per_sprint": team_capacity_sp(hist),
+        "sprint_history": [h.model_dump() for h in hist],
+    }

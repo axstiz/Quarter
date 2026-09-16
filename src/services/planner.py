@@ -52,9 +52,7 @@ def generate_plan(data: PlannerInput, first_free_sprint: int = 1) -> Plan:
     task_by_id = {t.task_id for t in data.tasks}
     known_tasks = [t for t in data.tasks]
     pending = [t.task_id for t in known_tasks if t.task_id not in tasks_in_cycle]
-    order = topo_order(pending, data.deps) or sorted()
-    if not order:
-        order = pending
+    order = topo_order(pending, data.deps) or sorted(pending)
 
     task_by_id = {t.task_id: t for t in known_tasks}
     blocked_by: dict[str, list[str]] = defaultdict(list)
