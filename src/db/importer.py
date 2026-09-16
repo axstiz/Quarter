@@ -78,6 +78,7 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path) -> dict[str, 
             status=row.get("status", "ToDo"),
             estimation_sp=_f(row.get("estimation_sp", "")),
             estimated_hh=_f(row.get("estimated_hh", "")),
+            spent_time=_f(row.get("spent_time", "")),
             priority=(10 if row.get("planned_in_sprint", "") == "Да" else 100 + i),
             planned_in_sprint=row.get("planned_in_sprint", "") == "Да",
         ))

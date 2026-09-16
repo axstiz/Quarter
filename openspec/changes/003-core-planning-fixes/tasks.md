@@ -30,3 +30,10 @@
 - [x] 5.1 Полный e2e: planner планирует большинство ToDo задач, а дне только приоритетных; причины обязан содержать объяснения
 - [x] 5.2 README: правила приоритизации, InProgress-остатка, кросс-командного заёма (допущения)
 - [x] 5.3 openspec validate; pytest; dataset репро
+
+## 7. Дополнение (change 007-snapshots внутри 003, по факту реализовано)
+
+- [x] 7.1 PlanORM.parent_plan_id, версионирование при факте?Да: факт спринта → новая версия (is_initial=False, parent-цепочка), кнопка POST /plans/{id}/recompute
+- [x] 7.2 _initial_plan_for: walking parent-цепочки до is_initial=True → метрики честно от первоначального плана
+- [x] 7.3 TaskORM.spent_time (село CSV и xlsx) → epский planner InProgress остаток по фактическим часам
+- [x] 7.4 tests/test_snapshots.py: e2e факт → новая версия → 409 повторного факта → recompute → метрики от initial

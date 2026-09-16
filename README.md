@@ -14,6 +14,17 @@ uv sync
 uv run scripts/split_dataset.py
 ```
 
+## NixOS-заметка (venv/LD)
+
+После `uv sync` на NixOS питон-расширения (numpy/pandas/greenlet) требуют libstdc++/zlib:
+
+```bash
+./scripts/fix-venv-nix.sh   # пропатчит .venv/*.so rpath (идемпотентно, только ELF64)
+```
+
+Телохуки (`.githooks/env.sh`) делают это автоматически для git-операций; для ручной
+работы (`uv run pytest`, `uv run uvicorn`) тоже запустите раз после каждого `uv sync`.
+
 ## Структура репозитория
 
 ```

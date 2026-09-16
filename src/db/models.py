@@ -37,6 +37,7 @@ class TaskORM(Base):
     status: Mapped[str] = mapped_column(String, default="ToDo")
     estimation_sp: Mapped[float] = mapped_column(Float, default=0.0)
     estimated_hh: Mapped[float] = mapped_column(Float, default=0.0)
+    spent_time: Mapped[float] = mapped_column(Float, default=0.0)
     planned_in_sprint: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
@@ -93,6 +94,7 @@ class PlanORM(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now())
     is_initial: Mapped[bool] = mapped_column(Boolean, default=True)
     recomputed_after_sprint: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    parent_plan_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class PlanItemORM(Base):

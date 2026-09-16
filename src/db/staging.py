@@ -59,6 +59,7 @@ async def _upsert_task(session: AsyncSession, tid: str, row: dict, order_index: 
         existing.team_id = str(row.get("team_id") or "") or existing.team_id
         existing.estimation_sp = _f(row.get("estimation_sp"), existing.estimation_sp)
         existing.estimated_hh = _f(row.get("estimated_hh"), existing.estimated_hh)
+        existing.spent_time = _f(row.get("spent_time"), existing.spent_time)
         existing.source = "imported"
         return False
     session.add(TaskORM(
@@ -69,6 +70,7 @@ async def _upsert_task(session: AsyncSession, tid: str, row: dict, order_index: 
         status=str(row.get("status") or "ToDo"),
         estimation_sp=_f(str(row.get("estimation_sp") or "")),
         estimated_hh=_f(str(row.get("estimated_hh") or "")),
+        spent_time=_f(row.get("spent_time")),
         priority=(10 if row.get("planned_in_sprint") == "Да" else 100 + order_index),
         source="imported",
     ))

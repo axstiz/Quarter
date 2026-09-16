@@ -299,7 +299,86 @@ async def load_facts(plan_id: str, sprint_no: int, body: dict, session: AsyncSes
     )
     session.add(fact)
     await session.commit()
-    return {"status": "accepted", "plan_id": plan_id, "sprint_no": sprint_no}
+    try:
+        new_plan = await _recompute_plan_version(session, plan_id, sprint_no)
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=f"пересчёт не удался: {e}")
+    return {"status": "accepted", "plan_id": plan_id, "sprint_no": sprint_no,
+            "new_plan_id": new_plan.plan_id if new_plan else plan_id}
+
+
+async def _recompute_plan_version(session, plan_id: str, after_sprint: int):
+    """Создаёт новую версию плана: факты проведены, остаток квартала
+    перераспределяется planner'ом (SP/color/роли, заём, разбитие).
+    Возвращает новую PlanORM с parent-ссылкой; отдаёт child plan_id."""
+    tasks, engineers, history, deps = await load_world(session)
+    current_items = (await session.execute(select(PlanItemORM).where(
+        PlanItemORM.plan_id == plan_id))).scalars().all()
+    facts = (await session.execute(select(SprintFactORM).where(
+        SprintFactORM.plan_id == plan_id))).scalars().all()
+    done_ids: set[str] = {str(x) for f in facts for x in (f.completed_task_ids or [])}
+    # выполненные задачи также те, что в данных уже Done
+    done_ids |= {t.task_id for t in tasks.values() if t.status == "Done"}
+
+    first_free = max(after_sprint, 0) + 1
+    new_orm = PlanORM(
+        is_initial=False,
+        parent_plan_id=plan_id,
+        recomputed_after_sprint=after_sprint,
+    )
+    session.add(new_orm)
+    await session.flush()
+    planner_in = PlannerInput(
+        [t for t in tasks.values() if t.task_id not in done_ids and t.status != "Done"],
+        engineers, history, deps,
+        spent_time={tid: t.spent_time for tid, t in tasks.items()},
+    )
+    child = generate_plan(planner_in, first_free_sprint=first_free)
+
+    for item in current_items:
+        if item.task_id in done_ids and item.decision == PlanDecision.planned.value:
+            session.add(PlanItemORM(
+                plan_id=new_orm.plan_id, task_id=item.task_id,
+                team_id=item.team_id, decision=PlanDecision.done_actual.value,
+                sprint_no=item.sprint_no, reason="выполнено по факту спринта",
+                planned_sp=item.planned_sp,
+            ))
+    for sprint in child.sprints:
+        for it in sprint.items:
+            session.add(PlanItemORM(
+                plan_id=new_orm.plan_id, task_id=it.task_id,
+                team_id=tasks[it.task_id].team_id if it.task_id in tasks else "",
+                decision=it.decision.value, sprint_no=it.sprint_no,
+                reason=it.reason, planned_sp=it.step_points_sp,
+            ))
+    for d in child.decisions:
+        session.add(PlanItemORM(
+            plan_id=new_orm.plan_id, task_id=d.task_id,
+            team_id=tasks[d.task_id].team_id if d.task_id in tasks else "",
+            decision=d.decision.value, sprint_no=None, reason=d.reason,
+            planned_sp=None,
+        ))
+    await session.commit()
+    return new_orm
+
+
+@router.post("/plans/{plan_id}/recompute")
+async def recompute_endpoint(plan_id: str, after_sprint: int = 0,
+                             session: AsyncSession = Depends(get_session)) -> dict:
+    """Кнопка «Пересчитать»: создаёт новую версию плана (снапшот-цепочка)."""
+    plan_orm = await get_plan_orm(session, plan_id)
+    if not plan_orm:
+        raise HTTPException(status_code=404, detail="план не найден")
+    if not 0 <= after_sprint <= SPRINTS_PER_QUARTER:
+        raise HTTPException(status_code=422, detail=f"after_sprint должна быть 0..{SPRINTS_PER_QUARTER}")
+    try:
+        new_plan = await _recompute_plan_version(session, plan_id, after_sprint)
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=f"пересчёт не удался: {e}")
+    return {"status": "recomputed", "new_plan_id": new_plan.plan_id,
+            "parent_plan_id": plan_id, "after_sprint": after_sprint}
 
 
 def _recomputed_plan(plan_before: Plan, done_task_ids: set[str]) -> Plan:
@@ -388,9 +467,9 @@ async def plan_metrics(plan_id: str, session: AsyncSession = Depends(get_session
     items = await get_plan_items(session, plan_id)
     plan = _plan_from_orm(plan_id, items)
     facts = (await session.execute(select(SprintFactORM).where(SprintFactORM.plan_id == plan_id))).scalars().all()
+    # факты считаются по всей цепочке версий (первоначальные спринты считаются
+    # в знаменателе SP: спринты до пересчёта — их факт игнорируем уже не нужно)
     initial = await _initial_plan_for(session, plan)
-    if initial is None:
-        initial = plan
     planned_sp_by_sprint: dict[int, float] = {}
     for s in initial.sprints:
         planned_sp_by_sprint[s.sprint_no] = sum(i.step_points_sp or 0.0 for i in s.items)
@@ -413,11 +492,20 @@ async def plan_metrics(plan_id: str, session: AsyncSession = Depends(get_session
     return report.model_dump()
 
 
-async def _initial_plan_for(session, plan: Plan) -> Plan | None:
-    """В текущей версии планы обновляются в одной строке plan_id (снапшоты не хранятся),
-    поэтому первоначальный план совпадает с текущим; при сохранении версий (последующий
-    change) здесь будет выборка по цепочке."""
-    return None
+async def _initial_plan_for(session, plan: Plan) -> Plan:
+    """Первый план в цепочке снапшотов родителя (is_initial=True)."""
+    seen = {plan.plan_id}
+    cur_id = plan.plan_id
+    while True:
+        cur_orm = await get_plan_orm(session, cur_id)
+        if not cur_orm:
+            return plan
+        if cur_orm.is_initial or not cur_orm.parent_plan_id or cur_orm.parent_plan_id in seen:
+            items = (await session.execute(select(PlanItemORM).where(
+                PlanItemORM.plan_id == cur_id))).scalars().all()
+            return _plan_from_orm(cur_id, items)
+        seen.add(cur_orm.parent_plan_id)
+        cur_id = cur_orm.parent_plan_id
 
 
 @router.get("/plans/{plan_id}/tasks/{task_id}/explanation")
@@ -502,7 +590,7 @@ async def task_detail(task_id: str, session: AsyncSession = Depends(get_session)
     if not task:
         raise HTTPException(status_code=404, detail="задача не найдена")
     return task.model_dump() | {
-        "blocks": [d for d in deps if d.task_id == task_id][0] if False else [b for a, b in deps if a == task_id],
+        "blocks": [b for a, b in deps if a == task_id],
         "blocked_by": [a for a, b in deps if b == task_id],
     }
 
@@ -618,7 +706,11 @@ async def confirm_cancel(plan_id: str, task_id: str,
         raise HTTPException(status_code=409, detail="нет отложенной отмены (cancel-request)")
     for item in items:
         if item.decision == PlanDecision.cancel_pending.value:
-            item.decision = PlanDecision.cancelled.value
-            item.reason = item.reason.replace("(кандидат на отмену — лида ", "отмена подтверждена (")
+            if "(кандидат на отмену" in (item.reason or ""):
+                item.reason = item.reason.replace("(кандидат на отмену", "(отмена подтверждена: ")
+            elif item.reason:
+                item.reason = item.reason.replace("(кандидат на отмену", "(отмена подтверждена: ")
+            else:
+                item.reason = "отмена подтверждена лидом"
     await session.commit()
     return {"status": "cancelled", "task_id": task_id}
