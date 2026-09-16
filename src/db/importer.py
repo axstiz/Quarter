@@ -69,7 +69,7 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path) -> dict[str, 
     if missing:
         raise FileNotFoundError(f"dataset не полный: {missing}")
 
-    for row in read_csv(dataset_dir / "tasks.csv"):
+    for i, row in enumerate(read_csv(dataset_dir / "tasks.csv")):
         session.add(TaskORM(
             task_id=row["task_id"],
             parent_id=row.get("parent_id") or None,
@@ -78,6 +78,7 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path) -> dict[str, 
             status=row.get("status", "ToDo"),
             estimation_sp=_f(row.get("estimation_sp", "")),
             estimated_hh=_f(row.get("estimated_hh", "")),
+            priority=(10 if row.get("planned_in_sprint", "") == "Да" else 100 + i),
             planned_in_sprint=row.get("planned_in_sprint", "") == "Да",
         ))
     counts["tasks"] = len(read_csv(dataset_dir / "tasks.csv"))

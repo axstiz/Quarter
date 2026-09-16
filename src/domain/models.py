@@ -19,6 +19,7 @@ class PlanDecision(str, Enum):
     planned = "planned"
     postponed = "postponed"
     cancelled = "cancelled"
+    cancel_pending = "cancelled_pending"
     done_actual = "done_actual"
 
 
@@ -28,9 +29,11 @@ class Task(BaseModel):
     team_id: str
     summary: str = ""
     status: str = "ToDo"
+    priority: float = 100.0  # human seed/ручной приоритет (меньше — раньше)
     estimation_sp: float = 0.0
     estimated_hh: float = 0.0
     role_hours: dict[str, float] = {}  # роль -> требуемые часы
+    spent_time: float = 0.0  # фактические потраченные часы (для InProgress-остатка)
 
 
 class Engineer(BaseModel):

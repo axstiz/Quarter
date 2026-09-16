@@ -64,6 +64,8 @@ async def load_world(session) -> tuple[dict[str, Task], list, list, dict]:
             team_id=r.team_id,
             summary=r.summary,
             status=r.status,
+            priority=float(r.priority),
+            spent_time=0.0,
             estimation_sp=r.estimation_sp,
             estimated_hh=r.estimated_hh,
             role_hours={},
@@ -394,12 +396,20 @@ async def plan_metrics(plan_id: str, session: AsyncSession = Depends(get_session
         planned_sp_by_sprint[s.sprint_no] = sum(i.step_points_sp or 0.0 for i in s.items)
     done_sp_by_sprint = {f.sprint_no: f.completed_sp for f in facts}
     done_task_ids = {tid for f in facts for tid in (f.completed_task_ids or [])}
-    initial_ids = [i.task_id for s in initial.sprints for i in s.items]
+    tasks_map, engineers, history, deps = await load_world(session)
+    initial_items = [
+        {"task_id": i.task_id,
+         "parent_id": tasks_map[i.task_id].parent_id if i.task_id in tasks_map else None,
+         "step_points_sp": i.step_points_sp or 0.0,
+         "sprint_no": s.sprint_no}
+        for s in initial.sprints for i in s.items
+    ]
     quarter_finished = len(facts) >= SPRINTS_PER_QUARTER
-    from src.services.metrics import compute_metrics
+    from src.services.metrics import compute_metrics_initiatives
 
-    report = compute_metrics(initial_ids, sorted(done_task_ids), planned_sp_by_sprint,
-                             done_sp_by_sprint, quarter_finished=quarter_finished)
+    report = compute_metrics_initiatives(initial_items, sorted(done_task_ids),
+                                         planned_sp_by_sprint, done_sp_by_sprint,
+                                         quarter_finished=quarter_finished)
     return report.model_dump()
 
 
@@ -551,3 +561,64 @@ async def team_detail(team_id: str, session: AsyncSession = Depends(get_session)
         "capacity_sp_per_sprint": team_capacity_sp(hist),
         "sprint_history": [h.model_dump() for h in hist],
     }
+
+
+# --- ручки приоритетов и отмен (change 003) -----------------------------
+
+@router.put("/tasks/{task_id}/priority")
+async def set_priority(task_id: str, body: dict, session: AsyncSession = Depends(get_session)) -> dict:
+    """human-in-loop: приоритет задачи (меньше — раньше)."""
+    priority = body.get("priority")
+    if priority is None:
+        raise HTTPException(status_code=422, detail="priority обязателен")
+    try:
+        priority = int(priority)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="priority — целое число")
+    task = (await session.execute(select(TaskORM).where(TaskORM.task_id == task_id))).scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="задача не найдена")
+    task.priority = priority
+    task.source = "manual"
+    await session.commit()
+    return {"status": "updated", "task_id": task_id, "priority": priority}
+
+
+@router.post("/plans/{plan_id}/tasks/{task_id}/cancel-request")
+async def cancel_request(plan_id: str, task_id: str,
+                         session: AsyncSession = Depends(get_session)) -> dict:
+    """Сервис предлагает отмену: перевод postponed-задачи в cancelled_pending."""
+    plan_orm = await get_plan_orm(session, plan_id)
+    if not plan_orm:
+        raise HTTPException(status_code=404, detail="план не найден")
+    items = (await session.execute(select(PlanItemORM).where(
+        PlanItemORM.plan_id == plan_id, PlanItemORM.task_id == task_id))).scalars().all()
+    if not items:
+        raise HTTPException(status_code=404, detail="задача не в плане")
+    for item in items:
+        if item.decision == PlanDecision.postponed.value:
+            item.decision = PlanDecision.cancel_pending.value
+            item.reason = (item.reason or "") + " (кандидат на отмену — ресурс/роли недоступны)"
+    await session.commit()
+    return {"status": "pending_confirmation", "task_id": task_id}
+
+
+@router.post("/plans/{plan_id}/tasks/{task_id}/confirm-cancel")
+async def confirm_cancel(plan_id: str, task_id: str,
+                         session: AsyncSession = Depends(get_session)) -> dict:
+    """Лид подтверждает отмену: cancelled_pending → cancelled."""
+    plan_orm = await get_plan_orm(session, plan_id)
+    if not plan_orm:
+        raise HTTPException(status_code=404, detail="план не найден")
+    items = (await session.execute(select(PlanItemORM).where(
+        PlanItemORM.plan_id == plan_id, PlanItemORM.task_id == task_id))).scalars().all()
+    if not items:
+        raise HTTPException(status_code=404, detail="задача не в плане")
+    if not any(i.decision == PlanDecision.cancel_pending.value for i in items):
+        raise HTTPException(status_code=409, detail="нет отложенной отмены (cancel-request)")
+    for item in items:
+        if item.decision == PlanDecision.cancel_pending.value:
+            item.decision = PlanDecision.cancelled.value
+            item.reason = item.reason.replace("(кандидат на отмену — лида ", "отмена подтверждена (")
+    await session.commit()
+    return {"status": "cancelled", "task_id": task_id}

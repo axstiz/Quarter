@@ -30,6 +30,7 @@ class TaskORM(Base):
     __tablename__ = "tasks"
     task_id: Mapped[str] = mapped_column(String, primary_key=True)
     source: Mapped[str] = mapped_column(String, default="imported")
+    priority: Mapped[int] = mapped_column(Integer, default=100)
     parent_id: Mapped[str | None] = mapped_column(String, nullable=True)
     team_id: Mapped[str] = mapped_column(String, index=True)
     summary: Mapped[str] = mapped_column(String, default="")

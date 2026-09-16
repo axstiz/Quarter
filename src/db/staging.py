@@ -48,7 +48,7 @@ def _date_conv(value) -> date | None:
     return None
 
 
-async def _upsert_task(session: AsyncSession, tid: str, row: dict) -> bool:
+async def _upsert_task(session: AsyncSession, tid: str, row: dict, order_index: int = 100) -> bool:
     existing = (await session.execute(select(TaskORM).where(TaskORM.task_id == tid))).scalar_one_or_none()
     if existing:
         if existing.source == "manual":
@@ -69,6 +69,7 @@ async def _upsert_task(session: AsyncSession, tid: str, row: dict) -> bool:
         status=str(row.get("status") or "ToDo"),
         estimation_sp=_f(str(row.get("estimation_sp") or "")),
         estimated_hh=_f(str(row.get("estimated_hh") or "")),
+        priority=(10 if row.get("planned_in_sprint") == "Да" else 100 + order_index),
         source="imported",
     ))
     return True
@@ -87,9 +88,12 @@ async def stage_import(session: AsyncSession, job) -> dict[str, int]:
         tid = str(row.get("task_id") or "").strip()
         if not tid or not TASK_ID_RE.match(tid):
             continue
-        by_task_id[tid] = row
-    for tid, row in by_task_id.items():
-        await _upsert_task(session, tid, row)
+        # полнота записи: отсекаем блоки-"<task_id> only" (пустые записи из матрицы)
+        cur = by_task_id.get(tid)
+        if cur is None or sum(bool(v) for v in row.values()) > sum(bool(v) for v in cur):
+            by_task_id[tid] = row
+    for i, (tid, row) in enumerate(by_task_id.items()):
+        await _upsert_task(session, tid, row, order_index=i)
     counts["tasks"] = len(by_task_id)
 
     seen_engineer: set[tuple[str, str, str]] = set()
