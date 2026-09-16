@@ -19,6 +19,9 @@ uv run scripts/split_dataset.py
 ```
 dataset/                     нормализованные данные (CSV, UTF-8)
 scripts/split_dataset.py     конвертор xlsx -> dataset/*.csv
+src/                         сервис (FastAPI): api/services/domain/db
+tests/                       pytest: юнит-тесты сервисов и API
+docker-compose.yml           PostgreSQL для сервиса
 openspec/                    спецификации (openspec)
 задание PostCode.md          условие хакатона
 Датасет_с_правками_основной.xlsx   исходные данные
@@ -34,7 +37,7 @@ openspec/                    спецификации (openspec)
 | `tasks.csv` | 45 задач: стандартные поля задачи, Story Points, статусы, даты, плановые/итоговые результаты | 45 |
 | `task_role_hours.csv` | фактически затраченное время по ролям для 6 задач (данные в листе есть только для них) | 6 |
 | `task_role_requirements.csv` | потребность в часах по ролям для каждой задачи (long-формат: `role, task_id, hours`); нулевые строки отброшены | 307 |
-| `task_dependencies.csv` | 16 зависимостей между задачами (тип: `has to be done before` / `is required for` / `depends on`) | 16 |
+| `task_dependencies.csv` | 16 строк зависимостей между задачами (типы: `has to be done before` / `is required for` / `depends on`); одна пара (SRV-4015→SRV-4016) продублирована в источнике — при импорте в БД дедуплицируется до 15 | 16 (15 уникальных) |
 | `engineers_profiles.csv` | 34 инженера: команда, роль, грейд, компетенции, занятость (capacity_rate) | 34 |
 | `team_history.csv` | история velocity спринтов по 5 командам | 12 |
 | `reference_values.csv` | справочники: итоги разработки, причины расхождения планов, результаты закрытия задач | 19 |
@@ -87,6 +90,40 @@ Workflow: `/opsx-propose "идея"` → ревью → `/opsx-apply` → `/opsx
 ```
 
 Спека (`openspec/specs/`) — контракт уже согласованного поведения; меняется последней, через `archive`.
+
+```bash
+# окружение + зависимости (Python 3.13)
+uv sync
+
+# пересборка dataset/ из исходного xlsx
+uv run scripts/split_dataset.py
+
+# БД (PostgreSQL) и сервис
+docker compose up -d
+uv run uvicorn src.main:app --reload   # Swagger: http://localhost:8000/docs
+```
+
+Тесты: `uv run pytest tests/ -q` (SQLite in-tmp, без docker).
+
+### API (v1)
+
+Импорт данных → план → факты спринта → риски и метрики:
+
+```bash
+curl -X POST localhost:8000/api/v1/data/import
+curl -X POST localhost:8000/api/v1/plans/generate
+curl localhost:8000/api/v1/plans/<id>               # план + причины решений
+curl -X POST localhost:8000/api/v1/plans/<id>/sprints/1/facts \
+     -H 'content-type: application/json' \
+     -d '{"completed_sp": 10, "completed_task_ids": ["ONK-2475"]}'
+curl localhost:8000/api/v1/plans/<id>/warnings      # 4 вида рисков
+curl localhost:8000/api/v1/plans/<id>/diff          # сдвиги после пересчёта
+curl localhost:8000/api/v1/plans/<id>/metrics       # факт/прогноз помечены
+curl localhost:8000/api/v1/bus-factor               # расчёт + методика
+curl localhost:8000/api/v1/star-map/summary
+```
+
+Всего ручек и схем — /docs (Swagger UI). До запуска `data/import` планирование недоступно (400).
 
 ### Соглашение по коммитам
 
