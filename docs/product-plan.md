@@ -76,7 +76,7 @@ xlsx (source of truth)
                        │              dependencies, starmap, bus_factor, metrics
                        ├── domain/    pydantic-схемы (контракты API)
                        └── db/        SQLAlchemy async, models, importer
-   фронтенд (SPA, делегирован) ──HTTP──> /api/v1 (Swagger: /docs)
+   фронтенд (многостраничный сайт, делегирован) ──HTTP──> /api/v1 (Swagger: /docs)
 ```
 
 **Текущие backend-ручки** (жирным — базовые для фронтенда):
