@@ -1,0 +1,24 @@
+stages:
+  - spec
+  - data
+
+openspec-validate:
+  stage: spec
+  image: node:22-alpine
+  script:
+    - npm i -g @fission-ai/openspec
+    - openspec validate --all
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+dataset-reproducible:
+  stage: data
+  image: ghcr.io/astral-sh/uv:python3.13-bookworm
+  script:
+    - uv sync
+    - uv run scripts/split_dataset.py
+    - git diff --exit-code -- dataset/ || (echo "dataset/*.csv не воспроизводится из xlsx — правь xlsx/скрипт, не CSV" && exit 1)
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"

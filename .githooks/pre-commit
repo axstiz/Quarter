@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Pre-commit: контроль спеков и воспроизводимости датасета.
+# Установка хуков: git config core.hooksPath .githooks
+set -uo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/env.sh"; nix_fix_ld
+fail=0
+
+# 1. Валидация openspec (если CLI доступен)
+if command -v openspec >/dev/null 2>&1; then
+    openspec validate --all || fail=1
+elif [ -x ~/.npm-global/bin/openspec ]; then
+    ~/.npm-global/bin/openspec validate --all || fail=1
+else
+    echo "warning: openspec CLI не найден, валидация спеков пропущена (npm i -g @fission-ai/openspec)"
+fi
+
+# 2. Формат Python-сценария (синтаксис)
+if command -v uv >/dev/null 2>&1; then
+    uv run python -m py_compile scripts/split_dataset.py || fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+    echo "commit отклонён: см. ошибки выше"
+fi
+exit "$fail"

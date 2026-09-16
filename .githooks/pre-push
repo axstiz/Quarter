@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Pre-push: полная проверка перед отправкой в GitLab (CI в проекте отключён).
+# Установка хуков: git config core.hooksPath .githooks
+set -uo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/env.sh"; nix_fix_ld
+fail=0
+echo "==> pre-push: openspec validate"
+if command -v openspec >/dev/null 2>&1; then
+    openspec validate --all || fail=1
+elif [ -x ~/.npm-global/bin/openspec ]; then
+    ~/.npm-global/bin/openspec validate --all || fail=1
+else
+    echo "warning: openspec CLI не найден, валидация спеков пропущена"
+fi
+
+echo "==> pre-push: воспроизводимость dataset/"
+if command -v uv >/dev/null 2>&1; then
+    uv run scripts/split_dataset.py >/dev/null || fail=1
+    if ! git diff --exit-code -- dataset/ >/dev/null 2>&1; then
+        echo "dataset/*.csv не воспроизводится из xlsx — закоммить перегенерацию или правь xlsx/скрипт"
+        fail=1
+    fi
+else
+    echo "warning: uv не найден, проверка dataset пропущена"
+fi
+
+if [ "$fail" -ne 0 ]; then
+    echo "push отклонён: см. ошибки выше"
+fi
+exit "$fail"
