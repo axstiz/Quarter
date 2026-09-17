@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import csv
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import (
@@ -53,30 +52,35 @@ def read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(fh))
 
 
-async def reset_dataset_tables(session: AsyncSession) -> None:
-    """Повторный импорт очищает только импортные, не затирает ручные записи
-    (source == manual, спека data). Планы и факты сохраняются (спека architecture).
-    Справочники reference_values/task_role_hours появятся с реализацией change 011."""
+async def reset_dataset_tables(session: AsyncSession, workspace_id: str = "default") -> None:
+    """Повторный импорт очищает только импортные записи текущего workspace,
+    не затирает ручные записи (source == manual) и другие workspace."""
     for model in (RoleRequirementORM, DependencyORM, EngineerORM, TeamHistoryORM, TaskORM):
         await session.execute(
-            model.__table__.delete().where(model.__table__.c.source != "manual")
+            model.__table__.delete().where(
+                model.__table__.c.source != "manual",
+                model.__table__.c.workspace_id == workspace_id,
+            )
         )
 
 
-async def import_dataset(session: AsyncSession, dataset_dir: Path) -> dict[str, int]:
+async def import_dataset(session: AsyncSession, dataset_dir: Path, workspace_id: str = "default") -> dict[str, int]:
     counts: dict[str, int] = {}
     missing = FILES - {p.name for p in dataset_dir.iterdir()}
     if missing:
         raise FileNotFoundError(f"dataset не полный: {missing}")
 
     existing_ids = {
-        r.task_id for r in (await session.execute(select(TaskORM))).scalars().all()
+        r.task_id for r in (
+            await session.execute(select(TaskORM).where(TaskORM.workspace_id == workspace_id))
+        ).scalars().all()
     }
     tasks_rows = read_csv(dataset_dir / "tasks.csv")
     for i, row in enumerate(tasks_rows):
         if row["task_id"] in existing_ids:
-            continue  # ручная запись (source=manual) приоритетна, спека data
+            continue
         session.add(TaskORM(
+            workspace_id=workspace_id,
             task_id=row["task_id"],
             parent_id=row.get("parent_id") or None,
             team_id=row.get("team_id", ""),
@@ -97,6 +101,7 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path) -> dict[str, 
             continue
         seen_deps.add(key)
         session.add(DependencyORM(
+            workspace_id=workspace_id,
             blocking_task_id=row["blocking_task_id"],
             blocked_task_id=row["blocked_task_id"],
             dependency_type=row.get("dependency_type", ""),
@@ -105,6 +110,7 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path) -> dict[str, 
 
     for row in read_csv(dataset_dir / "task_role_requirements.csv"):
         session.add(RoleRequirementORM(
+            workspace_id=workspace_id,
             task_id=row["task_id"],
             role=row["role"],
             hours=_f(row.get("hours", "")),
@@ -113,6 +119,7 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path) -> dict[str, 
 
     for row in read_csv(dataset_dir / "engineers_profiles.csv"):
         session.add(EngineerORM(
+            workspace_id=workspace_id,
             engineer_id=row["engineer_id"],
             team_id=row["team_id"],
             role=row["role"],
@@ -128,6 +135,7 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path) -> dict[str, 
         if not d:
             continue
         session.add(TeamHistoryORM(
+            workspace_id=workspace_id,
             snapshot_date=d,
             team_id=row["team_id"],
             velocity_achieved=_f(row.get("velocity_achieved", "")),

@@ -24,6 +24,7 @@ from src.db.models import (
     TaskORM,
     TeamHistoryORM,
 )
+from src.api.workspaces import get_current_workspace_id
 from src.db.session import get_session
 from src.domain.models import (
     SPRINTS_PER_QUARTER,
@@ -49,12 +50,14 @@ from src.services.replanner import (
 router = APIRouter(prefix="/api/v1")
 
 
-async def load_world(session) -> tuple[dict[str, Task], list, list, dict]:
-    rows = (await session.execute(select(TaskORM))).scalars().all()
-    role_reqs = (await session.execute(select(RoleRequirementORM) .where(RoleRequirementORM.hours > 0))).scalars().all()
-    deps_rows = (await session.execute(select(DependencyORM))).scalars().all()
-    eng_rows = (await session.execute(select(EngineerORM))).scalars().all()
-    hist_rows = (await session.execute(select(TeamHistoryORM))).scalars().all()
+async def load_world(session, workspace_id: str = "default") -> tuple[dict[str, Task], list, list, dict]:
+    rows = (await session.execute(select(TaskORM).where(TaskORM.workspace_id == workspace_id))).scalars().all()
+    role_reqs = (await session.execute(select(RoleRequirementORM).where(
+        RoleRequirementORM.workspace_id == workspace_id, RoleRequirementORM.hours > 0
+    ))).scalars().all()
+    deps_rows = (await session.execute(select(DependencyORM).where(DependencyORM.workspace_id == workspace_id))).scalars().all()
+    eng_rows = (await session.execute(select(EngineerORM).where(EngineerORM.workspace_id == workspace_id))).scalars().all()
+    hist_rows = (await session.execute(select(TeamHistoryORM).where(TeamHistoryORM.workspace_id == workspace_id))).scalars().all()
 
     tasks: dict[str, Task] = {}
     for r in rows:
@@ -125,12 +128,15 @@ async def get_plan_items(session, plan_id: str) -> list[PlanItemORM]:
 
 
 @router.post("/plans/generate", status_code=201)
-async def generate_plan_endpoint(session: AsyncSession = Depends(get_session)) -> dict:
-    tasks, engineers, history, deps = await load_world(session)
+async def generate_plan_endpoint(
+    session: AsyncSession = Depends(get_session),
+    workspace_id: str = Depends(get_current_workspace_id),
+) -> dict:
+    tasks, engineers, history, deps = await load_world(session, workspace_id=workspace_id)
     if not tasks:
         raise HTTPException(status_code=400, detail="нет данных в базе; сначала POST /api/v1/data/import")
     plan = generate_plan(PlannerInput(list(tasks.values()), engineers, history, deps))
-    plan_orm = PlanORM(is_initial=True)
+    plan_orm = PlanORM(workspace_id=workspace_id, is_initial=True)
     session.add(plan_orm)
     await session.flush()
     for sprint in plan.sprints:
@@ -193,11 +199,14 @@ async def get_plan(plan_id: str, session: AsyncSession = Depends(get_session)) -
 
 
 @router.post("/data/import")
-async def data_import(session: AsyncSession = Depends(get_session)) -> dict:
+async def data_import(
+    session: AsyncSession = Depends(get_session),
+    workspace_id: str = Depends(get_current_workspace_id),
+) -> dict:
     from src.core.config import settings
 
-    await reset_dataset_tables(session)
-    counts = await import_dataset(session, settings.dataset_dir)
+    await reset_dataset_tables(session, workspace_id=workspace_id)
+    counts = await import_dataset(session, settings.dataset_dir, workspace_id=workspace_id)
     return {"status": "imported", "counts": counts}
 
 
@@ -614,8 +623,9 @@ async def facts_list(plan_id: str, session: AsyncSession = Depends(get_session))
 @router.get("/tasks")
 async def tasks_list(team_id: str | None = None, status: str | None = None,
                      search: str | None = None,
-                     session: AsyncSession = Depends(get_session)) -> list[dict]:
-    tasks, engineers, history, deps = await load_world(session)
+                     session: AsyncSession = Depends(get_session),
+                     workspace_id: str = Depends(get_current_workspace_id)) -> list[dict]:
+    tasks, engineers, history, deps = await load_world(session, workspace_id=workspace_id)
     dep_map: dict[str, list[dict]] = defaultdict(list)
     for blocking, blocked in deps:
         dep_map[blocked].append({"blocking_task_id": blocking})
