@@ -54,11 +54,13 @@ def read_csv(path: Path) -> list[dict[str, str]]:
 
 
 async def reset_dataset_tables(session: AsyncSession) -> None:
-    """Повторный импорт очищает только импортные таблицы датасета:
-    планы и факты спринтов сохраняются (спека architecture). Справочники
-    reference_values/task_role_hours появятся с реализацией change 011."""
+    """Повторный импорт очищает только импортные, не затирает ручные записи
+    (source == manual, спека data). Планы и факты сохраняются (спека architecture).
+    Справочники reference_values/task_role_hours появятся с реализацией change 011."""
     for model in (RoleRequirementORM, DependencyORM, EngineerORM, TeamHistoryORM, TaskORM):
-        await session.execute(model.__table__.delete())
+        await session.execute(
+            model.__table__.delete().where(model.__table__.c.source != "manual")
+        )
 
 
 async def import_dataset(session: AsyncSession, dataset_dir: Path) -> dict[str, int]:
@@ -67,7 +69,13 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path) -> dict[str, 
     if missing:
         raise FileNotFoundError(f"dataset не полный: {missing}")
 
-    for i, row in enumerate(read_csv(dataset_dir / "tasks.csv")):
+    existing_ids = {
+        r.task_id for r in (await session.execute(select(TaskORM))).scalars().all()
+    }
+    tasks_rows = read_csv(dataset_dir / "tasks.csv")
+    for i, row in enumerate(tasks_rows):
+        if row["task_id"] in existing_ids:
+            continue  # ручная запись (source=manual) приоритетна, спека data
         session.add(TaskORM(
             task_id=row["task_id"],
             parent_id=row.get("parent_id") or None,
@@ -80,7 +88,7 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path) -> dict[str, 
             priority=(10 if row.get("planned_in_sprint", "") == "Да" else 100 + i),
             planned_in_sprint=row.get("planned_in_sprint", "") == "Да",
         ))
-    counts["tasks"] = len(read_csv(dataset_dir / "tasks.csv"))
+    counts["tasks"] = len(tasks_rows) - len(existing_ids & {r["task_id"] for r in tasks_rows})
 
     seen_deps = set()
     for row in read_csv(dataset_dir / "task_dependencies.csv"):

@@ -174,6 +174,37 @@ async def test_reimport_preserves_plans(client):
     assert any(f["sprint_no"] == 1 and f["completed_sp"] == 5.0 for f in facts)
 
 
+@pytest.mark.asyncio
+async def test_manual_records_survive_reimport(client):
+    """Спека data: повторный импорт не затирает source=manual (fix-manual-records-survive-reimport)."""
+    r = await client.post("/api/v1/data/import")
+    assert r.status_code == 200
+
+    r = await client.post("/api/v1/engineers", json={
+        "engineer_id": "ENG-MANUAL", "team_id": "Team-L", "role": "Ручная роль",
+    })
+    assert r.status_code == 201
+    r = await client.post("/api/v1/tasks",
+                          json={"task_id": "MAN-1", "team_id": "Team-L", "summary": "Ручная задача"})
+    assert r.status_code == 201
+
+    # повторный импорт — ручные записи выживают, импортные перезагружаются
+    r = await client.post("/api/v1/data/import")
+    assert r.status_code == 200
+    assert r.json()["counts"]["tasks"] == 45
+
+    r = await client.get("/api/v1/engineers/ENG-MANUAL")
+    assert r.status_code == 200
+    r = await client.get("/api/v1/tasks/MAN-1")
+    assert r.status_code == 200 and r.json()["summary"] == "Ручная задача"
+    r = await client.get("/api/v1/tasks", params={"team_id": "Team-L"})
+    ids = {t["task_id"] for t in r.json()}
+    assert "MAN-1" in ids
+    # импортная задача тоже на месте (перезагружена, не manual)
+    r = await client.get("/api/v1/tasks/ONK-2475")
+    assert r.status_code == 200
+
+
 @pytest.fixture()
 def sample_xlsx():
     from pathlib import Path as _P
