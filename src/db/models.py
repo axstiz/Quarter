@@ -118,3 +118,33 @@ class SprintFactORM(Base):
     completed_task_ids: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
     notes: Mapped[str] = mapped_column(String, default="")
     __table_args__ = (UniqueConstraint("plan_id", "sprint_no", name="uq_fact_per_sprint"),)
+
+
+class RoleOverrideORM(Base):
+    __tablename__ = "role_overrides"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
+    role: Mapped[str] = mapped_column(String, index=True)
+    permission: Mapped[str] = mapped_column(String, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class UserOverrideORM(Base):
+    __tablename__ = "user_overrides"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    permission: Mapped[str] = mapped_column(String, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class AuditLogORM(Base):
+    __tablename__ = "audit_logs"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
+    actor_id: Mapped[str] = mapped_column(String)
+    action: Mapped[str] = mapped_column(String)
+    target: Mapped[str] = mapped_column(String, default="")
+    details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now())
+
