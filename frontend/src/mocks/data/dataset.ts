@@ -1,5 +1,7 @@
-// Сгенерировано из dataset/*.csv — только для мок-режима. Удаляется вместе с папкой src/mocks.
-import type { Engineer, TeamHistory, Dependency } from '../../api/types'
+// Снято с ответов реального бэкенда (GET /tasks, /engineers, /dependencies, /teams/{id}, POST /data/upload)
+// + приоритеты по правилам импортёра (заказчик → 10, остальные → 100 + номер строки).
+// Только для мок-режима.
+import type { ColumnGuess, Dependency, Engineer, TeamHistory } from '../../api/types'
 import type { MockTask } from '../types'
 
 export const TASKS: MockTask[] = [
@@ -9,11 +11,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-L",
   "summary": "Модернизация фискального ядра (Проект Ф-22)",
   "status": "Done",
-  "priority": 1,
   "estimation_sp": 7.0,
   "estimated_hh": 276.0,
-  "spent_time": 276.0,
-  "customer_flag": true,
   "role_hours": {
    "Аналитик": 50.0,
    "Дизайнер": 8.0,
@@ -22,7 +21,14 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 46.0,
    "Тестировщик": 50.0,
    "Тестировщик (Автотестирование)": 12.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [
+   {
+    "blocking_task_id": "ANL-3041"
+   }
+  ],
+  "priority": 10
  },
  {
   "task_id": "ASUKD-5222",
@@ -30,11 +36,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-K",
   "summary": "Модернизация фискального ядра (Проект Ф-22)",
   "status": "Done",
-  "priority": 2,
   "estimation_sp": 7.0,
   "estimated_hh": 192.0,
-  "spent_time": 192.0,
-  "customer_flag": true,
   "role_hours": {
    "Аналитик": 32.0,
    "Разработчик Java": 54.0,
@@ -42,110 +45,19 @@ export const TASKS: MockTask[] = [
    "Специалист поддержки": 3.0,
    "Тестировщик": 74.0,
    "Тестировщик (Автотестирование)": 20.0
-  }
- },
- {
-  "task_id": "ANL-3041",
-  "parent_id": "BR-153",
-  "team_id": "Team-L",
-  "summary": "Анализ узких мест интеграционного шлюза",
-  "status": "Done",
-  "priority": 3,
-  "estimation_sp": 4.0,
-  "estimated_hh": 80.0,
-  "spent_time": 80.0,
-  "customer_flag": true,
-  "role_hours": {
-   "Аналитик": 80.0
-  }
- },
- {
-  "task_id": "MP-101",
-  "parent_id": "BR-155",
-  "team_id": "Team-L",
-  "summary": "Проектирование схемы данных шлюза маркетплейсов",
-  "status": "Done",
-  "priority": 4,
-  "estimation_sp": 4.0,
-  "estimated_hh": 64.0,
-  "spent_time": 64.0,
-  "customer_flag": true,
-  "role_hours": {
-   "Аналитик": 32.0,
-   "Архитектор решений": 32.0
-  }
- },
- {
-  "task_id": "DB-201",
-  "parent_id": "BR-156",
-  "team_id": "Team-Platform",
-  "summary": "Аудит хранимых процедур и подготовка схемы миграции",
-  "status": "Done",
-  "priority": 5,
-  "estimation_sp": 6.0,
-  "estimated_hh": 96.0,
-  "spent_time": 96.0,
-  "customer_flag": true,
-  "role_hours": {
-   "Архитектор 1С": 32.0,
-   "Архитектор решений": 32.0,
-   "Разработчик Java": 32.0
-  }
- },
- {
-  "task_id": "AI-301",
-  "parent_id": "BR-157",
-  "team_id": "Team-L",
-  "summary": "Разметка датасета диалогов и пилотное обучение LLM",
-  "status": "Done",
-  "priority": 6,
-  "estimation_sp": 6.0,
-  "estimated_hh": 150.0,
-  "spent_time": 150.0,
-  "customer_flag": true,
-  "role_hours": {
-   "Аналитик Big Data": 50.0,
-   "Разработчик Big Data": 50.0,
-   "Руководитель BigData": 50.0
-  }
- },
- {
-  "task_id": "SRV-4021",
-  "parent_id": "BR-159",
-  "team_id": "Team-Beta",
-  "summary": "Шлюз транзакционных и сервисных сообщений",
-  "status": "Done",
-  "priority": 7,
-  "estimation_sp": 5.0,
-  "estimated_hh": 110.0,
-  "spent_time": 110.0,
-  "customer_flag": true,
-  "role_hours": {
-   "Аналитик": 30.0,
-   "Разработчик Java": 40.0,
-   "Руководитель проекта": 20.0,
-   "Специалист поддержки": 10.0,
-   "Тестировщик": 10.0
-  }
- },
- {
-  "task_id": "SRV-4061",
-  "parent_id": "BR-163",
-  "team_id": "Team-Platform",
-  "summary": "Сбор логов производительности ядра и СУБД",
-  "status": "Done",
-  "priority": 8,
-  "estimation_sp": 3.0,
-  "estimated_hh": 90.0,
-  "spent_time": 90.0,
-  "customer_flag": true,
-  "role_hours": {
-   "Аналитик": 10.0,
-   "Архитектор решений": 20.0,
-   "ДевОпс": 40.0,
-   "Руководитель проекта": 10.0,
-   "Тестировщик": 10.0
-  }
+  },
+  "blocks": [
+   [
+    "ASUKD-5222",
+    "QA-9022"
+   ]
+  ],
+  "blocked_by": [
+   {
+    "blocking_task_id": "KP-3898"
+   }
+  ],
+  "priority": 10
  },
  {
   "task_id": "KP-3898",
@@ -153,11 +65,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Platform",
   "summary": "Модернизация фискального ядра (Проект Ф-22)",
   "status": "InProgress",
-  "priority": 9,
   "estimation_sp": 6.0,
   "estimated_hh": 194.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 32.0,
    "ДевОпс": 3.0,
@@ -166,7 +75,15 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 9.0,
    "Тестировщик": 8.0,
    "Тестировщик (Автотестирование)": 82.0
-  }
+  },
+  "blocks": [
+   [
+    "KP-3898",
+    "ASUKD-5222"
+   ]
+  ],
+  "blocked_by": [],
+  "priority": 102
  },
  {
   "task_id": "ONK-2914",
@@ -174,11 +91,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-L",
   "summary": "Модернизация фискального ядра (Проект Ф-22)",
   "status": "ToDo",
-  "priority": 10,
   "estimation_sp": 6.0,
   "estimated_hh": 240.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 16.0,
    "Разработчик Java": 120.0,
@@ -186,7 +100,10 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 40.0,
    "Тестировщик": 24.0,
    "Тестировщик (Автотестирование)": 20.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 103
  },
  {
   "task_id": "ASUKD-5918",
@@ -194,11 +111,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-K",
   "summary": "Модернизация фискального ядра (Проект Ф-22)",
   "status": "ToDo",
-  "priority": 11,
   "estimation_sp": 6.0,
   "estimated_hh": 192.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 32.0,
    "Разработчик Java": 54.0,
@@ -206,7 +120,10 @@ export const TASKS: MockTask[] = [
    "Специалист поддержки": 3.0,
    "Тестировщик": 74.0,
    "Тестировщик (Автотестирование)": 20.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 104
  },
  {
   "task_id": "KP-0000",
@@ -214,14 +131,14 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Platform",
   "summary": "Модернизация фискального ядра (Проект Ф-22)",
   "status": "ToDo",
-  "priority": 12,
   "estimation_sp": 4.0,
   "estimated_hh": 30.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Тестировщик (Автотестирование)": 30.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 105
  },
  {
   "task_id": "MOB-7011",
@@ -229,18 +146,23 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-L",
   "summary": "Редизайн личного кабинета и UI-кита",
   "status": "InProgress",
-  "priority": 13,
   "estimation_sp": 5.0,
   "estimated_hh": 180.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 30.0,
    "Дизайнер": 35.0,
    "Разработчик Android": 30.0,
    "Разработчик iOS": 30.0,
    "Разработчик Java Script": 40.0
-  }
+  },
+  "blocks": [
+   [
+    "MOB-7011",
+    "MOB-7012"
+   ]
+  ],
+  "blocked_by": [],
+  "priority": 106
  },
  {
   "task_id": "MOB-7012",
@@ -248,16 +170,20 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Platform",
   "summary": "Реализация мобильного виджета доставки",
   "status": "ToDo",
-  "priority": 14,
   "estimation_sp": 11.0,
   "estimated_hh": 210.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 10.0,
    "Разработчик Android": 100.0,
    "Разработчик iOS": 100.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [
+   {
+    "blocking_task_id": "MOB-7011"
+   }
+  ],
+  "priority": 107
  },
  {
   "task_id": "MOB-7013",
@@ -265,18 +191,38 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-L",
   "summary": "Адаптация UI под планшетные версии",
   "status": "ToDo",
-  "priority": 15,
   "estimation_sp": 4.0,
   "estimated_hh": 120.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 30.0,
    "Разработчик Android": 30.0,
    "Разработчик iOS": 40.0,
    "Разработчик Java": 10.0,
    "Тестировщик": 10.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 108
+ },
+ {
+  "task_id": "ANL-3041",
+  "parent_id": "BR-153",
+  "team_id": "Team-L",
+  "summary": "Анализ узких мест интеграционного шлюза",
+  "status": "Done",
+  "estimation_sp": 4.0,
+  "estimated_hh": 80.0,
+  "role_hours": {
+   "Аналитик": 80.0
+  },
+  "blocks": [
+   [
+    "ANL-3041",
+    "ONK-2475"
+   ]
+  ],
+  "blocked_by": [],
+  "priority": 10
  },
  {
   "task_id": "QA-9022",
@@ -284,15 +230,19 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-K",
   "summary": "Автоматизация регрессионных тестов API",
   "status": "ToDo",
-  "priority": 16,
   "estimation_sp": 6.0,
   "estimated_hh": 120.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Тестировщик": 40.0,
    "Тестировщик (Автотестирование)": 80.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [
+   {
+    "blocking_task_id": "ASUKD-5222"
+   }
+  ],
+  "priority": 110
  },
  {
   "task_id": "ANL-3042",
@@ -300,18 +250,43 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-L",
   "summary": "Проектирование очередей отказоустойчивости",
   "status": "ToDo",
-  "priority": 17,
   "estimation_sp": 6.0,
   "estimated_hh": 90.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик 1С": 10.0,
    "Разработчик 1С": 50.0,
    "Разработчик BigData": 10.0,
    "Специалист поддержки 1С": 2.0,
    "Тестировщик": 18.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 111
+ },
+ {
+  "task_id": "MP-101",
+  "parent_id": "BR-155",
+  "team_id": "Team-L",
+  "summary": "Проектирование схемы данных шлюза маркетплейсов",
+  "status": "Done",
+  "estimation_sp": 4.0,
+  "estimated_hh": 64.0,
+  "role_hours": {
+   "Аналитик": 32.0,
+   "Архитектор решений": 32.0
+  },
+  "blocks": [
+   [
+    "MP-101",
+    "AI-302"
+   ],
+   [
+    "MP-101",
+    "MP-102"
+   ]
+  ],
+  "blocked_by": [],
+  "priority": 10
  },
  {
   "task_id": "MP-102",
@@ -319,17 +294,29 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-K",
   "summary": "Разработка API-коннекторов к витринам (Проект МП)",
   "status": "InProgress",
-  "priority": 18,
   "estimation_sp": 9.0,
   "estimated_hh": 186.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 16.0,
    "Разработчик Java": 120.0,
    "Тестировщик": 30.0,
    "Тестировщик (Автотестирование)": 20.0
-  }
+  },
+  "blocks": [
+   [
+    "MP-102",
+    "MP-103"
+   ]
+  ],
+  "blocked_by": [
+   {
+    "blocking_task_id": "DB-202"
+   },
+   {
+    "blocking_task_id": "MP-101"
+   }
+  ],
+  "priority": 113
  },
  {
   "task_id": "MP-103",
@@ -337,15 +324,41 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-K",
   "summary": "Сквозное тестирование сценариев синхронизации",
   "status": "ToDo",
-  "priority": 19,
   "estimation_sp": 6.0,
   "estimated_hh": 114.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Тестировщик": 54.0,
    "Тестировщик (Автотестирование)": 60.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [
+   {
+    "blocking_task_id": "MP-102"
+   }
+  ],
+  "priority": 114
+ },
+ {
+  "task_id": "DB-201",
+  "parent_id": "BR-156",
+  "team_id": "Team-Platform",
+  "summary": "Аудит хранимых процедур и подготовка схемы миграции",
+  "status": "Done",
+  "estimation_sp": 6.0,
+  "estimated_hh": 96.0,
+  "role_hours": {
+   "Архитектор 1С": 32.0,
+   "Архитектор решений": 32.0,
+   "Разработчик Java": 32.0
+  },
+  "blocks": [
+   [
+    "DB-201",
+    "DB-202"
+   ]
+  ],
+  "blocked_by": [],
+  "priority": 10
  },
  {
   "task_id": "DB-202",
@@ -353,17 +366,30 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Platform",
   "summary": "Перенос логики и рефакторинг сервисов (Проект СУБД)",
   "status": "InProgress",
-  "priority": 20,
   "estimation_sp": 8.0,
   "estimated_hh": 324.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Архитектор решений": 32.0,
    "ДевОпс": 32.0,
    "Разработчик .net": 130.0,
    "Разработчик Java": 130.0
-  }
+  },
+  "blocks": [
+   [
+    "DB-202",
+    "MP-102"
+   ],
+   [
+    "DB-202",
+    "DB-203"
+   ]
+  ],
+  "blocked_by": [
+   {
+    "blocking_task_id": "DB-201"
+   }
+  ],
+  "priority": 116
  },
  {
   "task_id": "DB-203",
@@ -371,15 +397,41 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Platform",
   "summary": "Развертывание отказоустойчивого кластера и CI/CD",
   "status": "ToDo",
-  "priority": 21,
   "estimation_sp": 6.0,
   "estimated_hh": 80.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "ДевОпс": 40.0,
    "Разработчик Java": 32.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [
+   {
+    "blocking_task_id": "DB-202"
+   }
+  ],
+  "priority": 117
+ },
+ {
+  "task_id": "AI-301",
+  "parent_id": "BR-157",
+  "team_id": "Team-L",
+  "summary": "Разметка датасета диалогов и пилотное обучение LLM",
+  "status": "Done",
+  "estimation_sp": 6.0,
+  "estimated_hh": 150.0,
+  "role_hours": {
+   "Аналитик Big Data": 50.0,
+   "Разработчик Big Data": 50.0,
+   "Руководитель BigData": 50.0
+  },
+  "blocks": [
+   [
+    "AI-301",
+    "AI-302"
+   ]
+  ],
+  "blocked_by": [],
+  "priority": 10
  },
  {
   "task_id": "AI-302",
@@ -387,18 +439,25 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-L",
   "summary": "Интеграция ИИ-модели с витриной оператора КЦ",
   "status": "ToDo",
-  "priority": 22,
   "estimation_sp": 9.0,
   "estimated_hh": 216.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик Big Data": 16.0,
    "Разработчик Big Data": 20.0,
    "Разработчик Java Script": 100.0,
    "Руководитель BigData": 40.0,
    "Тестировщик": 40.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [
+   {
+    "blocking_task_id": "MP-101"
+   },
+   {
+    "blocking_task_id": "AI-301"
+   }
+  ],
+  "priority": 119
  },
  {
   "task_id": "AI-303",
@@ -406,18 +465,18 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-L",
   "summary": "Сбор обратной связи и дообучение классификатора",
   "status": "ToDo",
-  "priority": 23,
   "estimation_sp": 4.0,
   "estimated_hh": 100.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 30.0,
    "Архитектор решений": 30.0,
    "Разработчик Java": 15.0,
    "Тестировщик": 10.0,
    "Тестировщик (Автотестирование)": 15.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 120
  },
  {
   "task_id": "SRV-4011",
@@ -425,11 +484,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Alpha",
   "summary": "Оптимизация логистических маршрутов (Проект Оптима)",
   "status": "InProgress",
-  "priority": 24,
   "estimation_sp": 6.0,
   "estimated_hh": 160.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 40.0,
    "Архитектор решений": 20.0,
@@ -438,7 +494,19 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 20.0,
    "Тестировщик": 10.0,
    "Тестировщик (Автотестирование)": 10.0
-  }
+  },
+  "blocks": [
+   [
+    "SRV-4011",
+    "SRV-4012"
+   ],
+   [
+    "SRV-4011",
+    "SRV-4019"
+   ]
+  ],
+  "blocked_by": [],
+  "priority": 121
  },
  {
   "task_id": "SRV-4012",
@@ -446,11 +514,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Alpha",
   "summary": "Внедрение модуля динамического ценообразования",
   "status": "ToDo",
-  "priority": 25,
   "estimation_sp": 13.0,
   "estimated_hh": 240.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 40.0,
    "Аналитик Big Data": 35.0,
@@ -462,7 +527,14 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 20.0,
    "Тестировщик": 10.0,
    "Тестировщик (Автотестирование)": 10.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [
+   {
+    "blocking_task_id": "SRV-4011"
+   }
+  ],
+  "priority": 122
  },
  {
   "task_id": "SRV-4010",
@@ -470,11 +542,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Alpha",
   "summary": "Геокодирование адресов и картография",
   "status": "ToDo",
-  "priority": 26,
   "estimation_sp": 6.0,
   "estimated_hh": 110.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 10.0,
    "Аналитик Big Data": 10.0,
@@ -486,7 +555,29 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 10.0,
    "Тестировщик": 3.0,
    "Тестировщик (Автотестирование)": 10.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 123
+ },
+ {
+  "task_id": "SRV-4021",
+  "parent_id": "BR-159",
+  "team_id": "Team-Beta",
+  "summary": "Шлюз транзакционных и сервисных сообщений",
+  "status": "Done",
+  "estimation_sp": 5.0,
+  "estimated_hh": 110.0,
+  "role_hours": {
+   "Аналитик": 30.0,
+   "Разработчик Java": 40.0,
+   "Руководитель проекта": 20.0,
+   "Специалист поддержки": 10.0,
+   "Тестировщик": 10.0
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 10
  },
  {
   "task_id": "SRV-4022",
@@ -494,11 +585,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Beta",
   "summary": "Настройка каскадных правил отправки (SMS/Push)",
   "status": "ToDo",
-  "priority": 27,
   "estimation_sp": 6.0,
   "estimated_hh": 130.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 40.0,
    "Архитектор решений": 8.0,
@@ -506,7 +594,10 @@ export const TASKS: MockTask[] = [
    "Разработчик Java": 48.0,
    "Руководитель проекта": 20.0,
    "Тестировщик": 6.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 125
  },
  {
   "task_id": "SRV-4023",
@@ -514,11 +605,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Beta",
   "summary": "Подключение резервных SMS-провайдеров",
   "status": "ToDo",
-  "priority": 28,
   "estimation_sp": 3.0,
   "estimated_hh": 70.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 20.0,
    "Аналитик Big Data": 20.0,
@@ -526,7 +614,10 @@ export const TASKS: MockTask[] = [
    "Разработчик Big Data": 10.0,
    "Руководитель проекта": 5.0,
    "Тестировщик": 5.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 126
  },
  {
   "task_id": "SRV-4031",
@@ -534,11 +625,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Beta",
   "summary": "Кабинет мерчанта: загрузка товарных матриц",
   "status": "ToDo",
-  "priority": 29,
   "estimation_sp": 13.0,
   "estimated_hh": 340.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 80.0,
    "Архитектор решений": 30.0,
@@ -549,7 +637,10 @@ export const TASKS: MockTask[] = [
    "Специалист поддержки": 10.0,
    "Тестировщик": 30.0,
    "Тестировщик (Автотестирование)": 30.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 127
  },
  {
   "task_id": "SRV-4032",
@@ -557,11 +648,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Beta",
   "summary": "Интеграция ЛК с финансовым биллингом компании",
   "status": "ToDo",
-  "priority": 30,
   "estimation_sp": 6.0,
   "estimated_hh": 180.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 20.0,
    "Архитектор решений": 20.0,
@@ -570,7 +658,10 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 20.0,
    "Специалист поддержки": 10.0,
    "Тестировщик": 10.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 128
  },
  {
   "task_id": "SRV-4033",
@@ -578,11 +669,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Beta",
   "summary": "Генерация закрывающих документов для юрлиц",
   "status": "ToDo",
-  "priority": 31,
   "estimation_sp": 6.0,
   "estimated_hh": 120.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 30.0,
    "Архитектор решений": 10.0,
@@ -591,7 +679,10 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 15.0,
    "Тестировщик": 10.0,
    "Тестировщик (Автотестирование)": 5.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 129
  },
  {
   "task_id": "SRV-4041",
@@ -599,11 +690,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Delta",
   "summary": "ЕСИА-авторизация и проверка учетных записей",
   "status": "InProgress",
-  "priority": 32,
   "estimation_sp": 6.0,
   "estimated_hh": 220.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 40.0,
    "Аналитик Big Data": 8.0,
@@ -612,7 +700,10 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 7.0,
    "Руководитель BigData": 3.0,
    "Тестировщик": 42.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 130
  },
  {
   "task_id": "SRV-4042",
@@ -620,11 +711,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Delta",
   "summary": "Подключение коннекторов СМЭВ 3.0",
   "status": "ToDo",
-  "priority": 33,
   "estimation_sp": 6.0,
   "estimated_hh": 150.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 20.0,
    "Архитектор решений": 10.0,
@@ -633,7 +721,10 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 20.0,
    "Специалист поддержки": 10.0,
    "Тестировщик": 10.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 131
  },
  {
   "task_id": "SRV-4043",
@@ -641,18 +732,18 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Delta",
   "summary": "Проектирование витрины регламентированных справок",
   "status": "ToDo",
-  "priority": 34,
   "estimation_sp": 4.0,
   "estimated_hh": 90.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 10.0,
    "Архитектор решений": 20.0,
    "ДевОпс": 40.0,
    "Руководитель проекта": 10.0,
    "Тестировщик": 10.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 132
  },
  {
   "task_id": "SRV-4051",
@@ -660,11 +751,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Delta",
   "summary": "Архитектура шины обмена кадровыми документами",
   "status": "ToDo",
-  "priority": 35,
   "estimation_sp": 5.0,
   "estimated_hh": 130.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 40.0,
    "Архитектор решений": 8.0,
@@ -672,7 +760,10 @@ export const TASKS: MockTask[] = [
    "Разработчик Java": 48.0,
    "Руководитель проекта": 20.0,
    "Тестировщик": 6.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 133
  },
  {
   "task_id": "SRV-4052",
@@ -680,11 +771,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Delta",
   "summary": "Внедрение КЭП (Квалифицированной ЭЦП) инженеров",
   "status": "ToDo",
-  "priority": 36,
   "estimation_sp": 5.0,
   "estimated_hh": 160.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 20.0,
    "Архитектор решений": 15.0,
@@ -693,7 +781,29 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 15.0,
    "Специалист поддержки": 10.0,
    "Тестировщик": 10.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 134
+ },
+ {
+  "task_id": "SRV-4061",
+  "parent_id": "BR-163",
+  "team_id": "Team-Platform",
+  "summary": "Сбор логов производительности ядра и СУБД",
+  "status": "Done",
+  "estimation_sp": 3.0,
+  "estimated_hh": 90.0,
+  "role_hours": {
+   "Аналитик": 10.0,
+   "Архитектор решений": 20.0,
+   "ДевОпс": 40.0,
+   "Руководитель проекта": 10.0,
+   "Тестировщик": 10.0
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 10
  },
  {
   "task_id": "SRV-4062",
@@ -701,11 +811,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Platform",
   "summary": "Визуализация дашбордов Grafana / Prometheus",
   "status": "ToDo",
-  "priority": 37,
   "estimation_sp": 6.0,
   "estimated_hh": 140.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 30.0,
    "Архитектор решений": 20.0,
@@ -714,7 +821,10 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 20.0,
    "Тестировщик": 5.0,
    "Тестировщик (Автотестирование)": 5.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 136
  },
  {
   "task_id": "SRV-4063",
@@ -722,11 +832,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Platform",
   "summary": "Настройка алертинга критических сбоев",
   "status": "ToDo",
-  "priority": 38,
   "estimation_sp": 4.0,
   "estimated_hh": 100.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 20.0,
    "Архитектор решений": 5.0,
@@ -735,7 +842,10 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 15.0,
    "Тестировщик": 10.0,
    "Тестировщик (Автотестирование)": 5.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 137
  },
  {
   "task_id": "SRV-4071",
@@ -743,11 +853,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-K",
   "summary": "Анализ медленных запросов платежного шлюза",
   "status": "ToDo",
-  "priority": 39,
   "estimation_sp": 9.0,
   "estimated_hh": 180.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 40.0,
    "Архитектор решений": 20.0,
@@ -758,7 +865,10 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 20.0,
    "Тестировщик": 10.0,
    "Тестировщик (Автотестирование)": 10.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 138
  },
  {
   "task_id": "SRV-4072",
@@ -766,11 +876,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-K",
   "summary": "Перевод эквайринга на асинхронную обработку",
   "status": "ToDo",
-  "priority": 40,
   "estimation_sp": 7.0,
   "estimated_hh": 210.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 25.0,
    "Архитектор решений": 5.0,
@@ -782,7 +889,10 @@ export const TASKS: MockTask[] = [
    "Специалист поддержки": 10.0,
    "Тестировщик": 10.0,
    "Тестировщик (Автотестирование)": 5.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 139
  },
  {
   "task_id": "SRV-4081",
@@ -790,11 +900,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Alpha",
   "summary": "Витрина данных коммерческой аналитики",
   "status": "ToDo",
-  "priority": 41,
   "estimation_sp": 5.0,
   "estimated_hh": 140.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 40.0,
    "Архитектор решений": 10.0,
@@ -803,7 +910,10 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 15.0,
    "Тестировщик": 10.0,
    "Тестировщик (Автотестирование)": 5.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 140
  },
  {
   "task_id": "SRV-4082",
@@ -811,11 +921,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Alpha",
   "summary": "Оптимизация витрин и агрегатов ClickHouse",
   "status": "ToDo",
-  "priority": 42,
   "estimation_sp": 5.0,
   "estimated_hh": 190.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 30.0,
    "Архитектор 1С": 3.0,
@@ -827,7 +934,10 @@ export const TASKS: MockTask[] = [
    "Специалист поддержки 1С": 10.0,
    "Тестировщик": 10.0,
    "Тестировщик (Автотестирование)": 5.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 141
  },
  {
   "task_id": "SRV-4091",
@@ -835,11 +945,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Alpha",
   "summary": "Проектирование витрины \"Программа лояльности\"",
   "status": "ToDo",
-  "priority": 43,
   "estimation_sp": 9.0,
   "estimated_hh": 120.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 20.0,
    "Архитектор решений": 12.0,
@@ -848,7 +955,10 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 10.0,
    "Специалист поддержки": 1.0,
    "Тестировщик": 5.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 142
  },
  {
   "task_id": "SRV-4092",
@@ -856,11 +966,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-Alpha",
   "summary": "Реализация процессинга бонусных баллов",
   "status": "ToDo",
-  "priority": 44,
   "estimation_sp": 9.0,
   "estimated_hh": 240.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 45.0,
    "Архитектор решений": 5.0,
@@ -872,7 +979,10 @@ export const TASKS: MockTask[] = [
    "Специалист поддержки": 10.0,
    "Тестировщик": 10.0,
    "Тестировщик (Автотестирование)": 5.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 143
  },
  {
   "task_id": "SRV-4093",
@@ -880,11 +990,8 @@ export const TASKS: MockTask[] = [
   "team_id": "Team-K",
   "summary": "Интеграция лояльности с кассовым ПО",
   "status": "ToDo",
-  "priority": 45,
   "estimation_sp": 5.0,
   "estimated_hh": 160.0,
-  "spent_time": 0.0,
-  "customer_flag": false,
   "role_hours": {
    "Аналитик": 40.0,
    "Архитектор решений": 20.0,
@@ -893,7 +1000,10 @@ export const TASKS: MockTask[] = [
    "Руководитель проекта": 20.0,
    "Тестировщик": 10.0,
    "Тестировщик (Автотестирование)": 10.0
-  }
+  },
+  "blocks": [],
+  "blocked_by": [],
+  "priority": 144
  }
 ]
 
@@ -1186,30 +1296,6 @@ export const TEAM_HISTORY: TeamHistory[] = [
   "planned_sp": 12.0
  },
  {
-  "team_id": "Team-K",
-  "snapshot_date": "2025-12-16",
-  "velocity_achieved": 14.0,
-  "planned_sp": 17.0
- },
- {
-  "team_id": "Team-K",
-  "snapshot_date": "2025-12-30",
-  "velocity_achieved": 18.0,
-  "planned_sp": 17.0
- },
- {
-  "team_id": "Team-Platform",
-  "snapshot_date": "2025-12-02",
-  "velocity_achieved": 8.0,
-  "planned_sp": 10.0
- },
- {
-  "team_id": "Team-Platform",
-  "snapshot_date": "2025-12-16",
-  "velocity_achieved": 10.0,
-  "planned_sp": 10.0
- },
- {
   "team_id": "Team-Alpha",
   "snapshot_date": "2026-04-15",
   "velocity_achieved": 15.0,
@@ -1232,6 +1318,30 @@ export const TEAM_HISTORY: TeamHistory[] = [
   "snapshot_date": "2026-04-29",
   "velocity_achieved": 11.0,
   "planned_sp": 12.0
+ },
+ {
+  "team_id": "Team-K",
+  "snapshot_date": "2025-12-16",
+  "velocity_achieved": 14.0,
+  "planned_sp": 17.0
+ },
+ {
+  "team_id": "Team-K",
+  "snapshot_date": "2025-12-30",
+  "velocity_achieved": 18.0,
+  "planned_sp": 17.0
+ },
+ {
+  "team_id": "Team-Platform",
+  "snapshot_date": "2025-12-02",
+  "velocity_achieved": 8.0,
+  "planned_sp": 10.0
+ },
+ {
+  "team_id": "Team-Platform",
+  "snapshot_date": "2025-12-16",
+  "velocity_achieved": 10.0,
+  "planned_sp": 10.0
  },
  {
   "team_id": "Team-Delta",
@@ -1307,10 +1417,149 @@ export const DEPENDENCIES: Dependency[] = [
  {
   "blocking_task_id": "SRV-4011",
   "blocked_task_id": "SRV-4019"
- },
- {
-  "blocking_task_id": "SRV-4015",
-  "blocked_task_id": "SRV-4016"
  }
 ]
+
+export const DATASET_COLUMN_GUESSES: ColumnGuess[] = [
+ {
+  "column": "Номер инициативы",
+  "entity": "task",
+  "field": "parent_id",
+  "confidence": "high"
+ },
+ {
+  "column": "task_id",
+  "entity": "task",
+  "field": "task_id",
+  "confidence": "high"
+ },
+ {
+  "column": "parent_id",
+  "entity": "task",
+  "field": "parent_id",
+  "confidence": "high"
+ },
+ {
+  "column": "summary",
+  "entity": "task",
+  "field": "summary",
+  "confidence": "high"
+ },
+ {
+  "column": "team_id",
+  "entity": "task",
+  "field": "team_id",
+  "confidence": "high"
+ },
+ {
+  "column": "status",
+  "entity": "task",
+  "field": "status",
+  "confidence": "high"
+ },
+ {
+  "column": "rung",
+  "entity": "task",
+  "field": "rank",
+  "confidence": "high"
+ },
+ {
+  "column": "spent_time",
+  "entity": "task",
+  "field": "spent_time",
+  "confidence": "high"
+ },
+ {
+  "column": "estimation_sp",
+  "entity": "task",
+  "field": "estimation_sp",
+  "confidence": "high"
+ },
+ {
+  "column": "created_at",
+  "entity": "task",
+  "field": "created_at",
+  "confidence": "high"
+ },
+ {
+  "column": "planned_start",
+  "entity": "task",
+  "field": "planned_start",
+  "confidence": "high"
+ },
+ {
+  "column": "planned_end",
+  "entity": "task",
+  "field": "planned_end",
+  "confidence": "high"
+ },
+ {
+  "column": "actual_start",
+  "entity": "task",
+  "field": "actual_start",
+  "confidence": "high"
+ },
+ {
+  "column": "actual_end",
+  "entity": "task",
+  "field": "actual_end",
+  "confidence": "high"
+ },
+ {
+  "column": "estimated_hh",
+  "entity": "task",
+  "field": "estimated_hh",
+  "confidence": "high"
+ },
+ {
+  "column": "плановый результат",
+  "entity": "task",
+  "field": "planned_result",
+  "confidence": "high"
+ },
+ {
+  "column": "будет включено в спринт",
+  "entity": "task",
+  "field": "planned_in_sprint",
+  "confidence": "high"
+ },
+ {
+  "column": "заказчик",
+  "entity": "task",
+  "field": "customer_result",
+  "confidence": "high"
+ },
+ {
+  "column": "исполнитель",
+  "entity": "task",
+  "field": "performer_result",
+  "confidence": "high"
+ },
+ {
+  "column": "итоговый результат",
+  "entity": "task",
+  "field": "final_result",
+  "confidence": "high"
+ }
+]
+
+export const DATASET_UNMAPPED: string[] = []
+
+export const DATASET_PREVIEW_COUNTS: Record<string, number> = {
+ "task": 115,
+ "engineer": 57,
+ "role_requirement": 23,
+ "dependency": 16,
+ "team_history": 12
+}
+
+export const DATASET_CONFIRM_COUNTS: Record<string, number> = {
+ "tasks": 45,
+ "dependencies": 15,
+ "role_requirements": 307,
+ "engineers": 34,
+ "team_history": 12
+}
+
+export const BUS_FACTOR_METHODOLOGY: string = "Bus Factor = число носителей компетенции (роли или заявленного навыка) в области расчёта (компания или команда); инженер, работающий в двух командах по 0.5 ставки, считается носителем в обеих. Риск отмечается при factor ≤ 1. Расчёт по профилям engineers_profiles; грейд не влияет. Ограничение методики: навыки заявлены декларативно и проверяются по строке skills_declared (без учёта уровня владения)."
 

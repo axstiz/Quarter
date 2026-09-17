@@ -1,39 +1,35 @@
-import type { BusFactorItem, Explanation, PlanDiff, PlanTask, PlanWarning, SprintFact, UploadJob } from '../api/types'
+import type { Decision, TaskInfo, UploadJob } from '../api/types'
 
-export interface MockTask {
-  task_id: string
-  parent_id: string | null
-  team_id: string
-  summary: string
-  status: 'ToDo' | 'InProgress' | 'Done' | string
+/** Задача как в GET /tasks + priority из БД (в ответах API не отдаётся). */
+export interface MockTask extends TaskInfo {
   priority: number
-  estimation_sp: number
-  estimated_hh: number
-  spent_time: number
-  customer_flag: boolean
-  role_hours: Record<string, number>
 }
 
-export type MockPlanItem = Pick<PlanTask, 'task_id' | 'decision' | 'sprint_no' | 'reason' | 'step_points_sp'>
-
-export interface MockPlan {
+/** Строка plan_items (как в БД бэкенда). */
+export interface ItemRow {
   plan_id: string
-  parent_plan_id: string | null
+  task_id: string
+  team_id: string
+  decision: Decision
+  sprint_no: number | null
+  reason: string
+  planned_sp: number | null
+}
+
+export interface PlanRow {
+  plan_id: string
   is_initial: boolean
+  parent_plan_id: string | null
   recomputed_after_sprint: number | null
   created_at: string
-  items: MockPlanItem[]
-  not_planned: Explanation[]
 }
 
-export interface MockState {
-  plans: MockPlan[]
-  /** Факты хранятся на той версии плана, в которую их загрузили (как на бэке). */
-  facts: Record<string, SprintFact[]>
-  /** warnings/diff считаются для версии, в которую загрузили факт. */
-  warnings: Record<string, PlanWarning[]>
-  diffs: Record<string, PlanDiff>
-  jobs: Record<string, UploadJob & { polls: number }>
+export interface FactRow {
+  plan_id: string
+  sprint_no: number
+  completed_sp: number
+  completed_task_ids: string[]
+  notes: string
 }
 
-export type { BusFactorItem }
+export type MockJob = UploadJob & { polls: number }

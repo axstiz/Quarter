@@ -164,6 +164,9 @@ export interface TaskInfo {
   estimation_sp: number
   estimated_hh: number
   role_hours: Record<string, number>
+  /** Пары [blocking, blocked], где задача блокирующая (формат бэка) */
+  blocks: [string, string][]
+  blocked_by: { blocking_task_id: string }[]
 }
 
 export interface Dependency {

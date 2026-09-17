@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { api } from './endpoints'
 import type { EngineerFilters, SprintFactInput } from './types'
@@ -102,6 +102,13 @@ export function useTeam(id: string | null) {
   return useQuery({ queryKey: keys.team(id ?? ''), queryFn: () => api.getTeam(id!), enabled: !!id })
 }
 
+/** Детали нескольких команд (ёмкость SP/спринт) — для таблицы загрузки. */
+export function useTeamDetails(ids: string[]) {
+  return useQueries({
+    queries: ids.map((id) => ({ queryKey: keys.team(id), queryFn: () => api.getTeam(id) })),
+  })
+}
+
 // --- мутации ---
 
 /** Бэк на любой пересчёт создаёт новую версию плана — сбрасываем всё, что от плана зависит. */
@@ -130,14 +137,17 @@ export function useSubmitFact(planId: string) {
 
 export function useRecompute(planId: string) {
   const invalidate = useInvalidatePlans()
-  return useMutation({ mutationFn: () => api.recompute(planId), onSuccess: invalidate })
+  return useMutation({ mutationFn: (afterSprint: number) => api.recompute(planId, afterSprint), onSuccess: invalidate })
 }
 
 export function useSetPriorities() {
   return useMutation({
     // Бэк принимает приоритет по одной задаче — шлём последовательно, чтобы не гонять БД параллельно.
-    mutationFn: async (orderedTaskIds: string[]) => {
-      for (const [i, id] of orderedTaskIds.entries()) await api.setPriority(id, i + 1)
+    mutationFn: async ({ ids, onProgress }: { ids: string[]; onProgress?: (done: number) => void }) => {
+      for (const [i, id] of ids.entries()) {
+        await api.setPriority(id, i + 1)
+        onProgress?.(i + 1)
+      }
     },
   })
 }

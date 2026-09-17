@@ -51,7 +51,8 @@ export const api = {
   // Стр. 2 — факт и пересчёт
   submitFact: (planId: string, sprintNo: number, body: SprintFactInput) =>
     request<FactResponse>('POST', `/plans/${planId}/sprints/${sprintNo}/facts`, body),
-  recompute: (planId: string) => request<RecomputeResponse>('POST', `/plans/${planId}/recompute`),
+  /** after_sprint — последний спринт с фактом: пересчитываются спринты после него (по умолчанию бэк берёт 0 = весь квартал) */
+  recompute: (planId: string, afterSprint: number) => request<RecomputeResponse>('POST', `/plans/${planId}/recompute?after_sprint=${afterSprint}`),
   listFacts: (planId: string) => request<SprintFact[]>('GET', `/plans/${planId}/facts`),
   getWarnings: (planId: string) => request<PlanWarning[]>('GET', `/plans/${planId}/warnings`),
   getDiff: (planId: string) => request<PlanDiff>('GET', `/plans/${planId}/diff`),
