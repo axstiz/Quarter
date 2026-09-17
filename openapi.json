@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "PostCode Planner",
-    "description": "Кор картальное планирование команд и звёздная карта. См. README.",
+    "description": "Квартальное планирование команд и звёздная карта. См. README.",
     "version": "0.1.0"
   },
   "paths": {
@@ -580,6 +580,47 @@
                   "type": "object",
                   "additionalProperties": true,
                   "title": "Response Task Explanation Api V1 Plans  Plan Id  Tasks  Task Id  Explanation Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plans/{plan_id}/bus-risk": {
+      "get": {
+        "summary": "Plan Bus Risk Endpoint",
+        "operationId": "plan_bus_risk_endpoint_api_v1_plans__plan_id__bus_risk_get",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Plan Bus Risk Endpoint Api V1 Plans  Plan Id  Bus Risk Get"
                 }
               }
             }

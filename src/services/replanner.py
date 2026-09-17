@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
 
 from src.domain.models import (
     SPRINTS_PER_QUARTER,
     Engineer,
-    Explanation,
     Plan,
     PlanDecision,
     PlanItem,
     Task,
-    TeamHistory,
     Warning as PlanWarning,
 )
 
@@ -20,37 +17,6 @@ WARN_DEADLINE_OVERFLOW = "deadline_overflow"
 WARN_DEPENDENCY_SHIFT = "dependency_shift"
 WARN_ROLE_DEFICIT = "role_deficit"
 WARN_COMPOSITION_CHANGE = "composition_change"
-
-
-def recompute_plan(
-    plan: Plan,
-    done_tasks: list[str],
-    carried: list[str],
-) -> tuple[Plan, list[Explanation]]:
-    """Пересчёт оставшихся спринтов после факта.
-
-    done_tasks: task_id выполненных в спринте;
-    planned items of выполненных → done_actual.
-    Возвращает новый план (оставшиеся спринты) и список решений-диффов.
-    """
-    new_items: list[PlanItem] = []
-    for sprint in plan.sprints:
-        for item in sprint.items:
-            if item.task_id in done_tasks:
-                new_items.append(PlanItem(
-                    task_id=item.task_id,
-                    decision=PlanDecision.done_actual,
-                    sprint_no=sprint.sprint_no,
-                    reason="выполнено по факту спринта",
-                ))
-            else:
-                new_items.append(PlanItem(
-                    task_id=item.task_id,
-                    decision=PlanDecision.postponed,
-                    reason="не выполнено в плановом спринте",
-                    step_points_sp=item.step_points_sp,
-                ))
-    return plan, []
 
 
 def compute_warnings(
