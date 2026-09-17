@@ -1,30 +1,26 @@
-import type { HTMLAttributes } from 'react'
-import { cn } from '@/lib/cn'
-import type { Tone } from '@/lib/decision'
+import type { ReactNode } from 'react'
+import type { Decision } from '@/api/types'
+import { DECISION_LABEL } from '@/lib/labels'
 
-const tones: Record<Tone, string> = {
-  neutral: 'bg-surface-2 text-muted',
-  accent: 'bg-accent-soft text-accent',
-  ok: 'bg-ok-soft text-ok',
-  warn: 'bg-warn-soft text-warn',
-  danger: 'bg-danger-soft text-danger',
-  pending: 'bg-pending-soft text-pending',
-  done: 'bg-done-soft text-done',
-}
+export type Tone = 'neutral' | 'plan' | 'done' | 'shift' | 'over' | 'pending'
 
-interface Props extends HTMLAttributes<HTMLSpanElement> {
-  tone?: Tone
-  dot?: boolean
-}
-
-export function Badge({ tone = 'neutral', dot, className, children, ...rest }: Props) {
+export function Badge({ tone = 'neutral', plain, children }: { tone?: Tone; plain?: boolean; children: ReactNode }) {
   return (
-    <span
-      className={cn('inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs font-medium whitespace-nowrap', tones[tone], className)}
-      {...rest}
-    >
-      {dot && <span className="size-1.5 rounded-full bg-current" />}
+    <span className={plain ? 'badge badge--plain' : 'badge'} data-tone={tone}>
       {children}
     </span>
   )
+}
+
+export const DECISION_TONE: Record<Decision, Tone> = {
+  planned: 'plan',
+  postponed: 'shift',
+  cancelled_pending: 'pending',
+  cancelled: 'over',
+  done_actual: 'done',
+}
+
+/** Цвет дублируется текстом — статус не передаётся одним цветом. */
+export function DecisionBadge({ decision }: { decision: Decision }) {
+  return <Badge tone={DECISION_TONE[decision]}>{DECISION_LABEL[decision]}</Badge>
 }

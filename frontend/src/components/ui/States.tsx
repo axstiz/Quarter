@@ -1,41 +1,70 @@
-import { AlertTriangle, RotateCw } from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { ApiError } from '@/api/client'
-import { cn } from '@/lib/cn'
 import { Button } from './Button'
 
-export function EmptyState({ icon, title, description, action, className }: { icon: ReactNode; title: ReactNode; description?: ReactNode; action?: ReactNode; className?: string }) {
+export function Empty({ icon, title, text, actions }: { icon: ReactNode; title: string; text?: ReactNode; actions?: ReactNode }) {
   return (
-    <div className={cn('flex flex-col items-center justify-center px-6 py-14 text-center', className)}>
-      <div className="mb-4 grid size-12 place-items-center rounded-2xl bg-accent-soft text-accent">{icon}</div>
-      <h3 className="text-base font-semibold">{title}</h3>
-      {description && <p className="mt-1.5 max-w-sm text-sm text-muted">{description}</p>}
-      {action && <div className="mt-5">{action}</div>}
+    <div className="empty">
+      <div className="empty__icon" aria-hidden>
+        {icon}
+      </div>
+      <div className="empty__title">{title}</div>
+      {text && <div className="empty__text">{text}</div>}
+      {actions && <div className="empty__actions">{actions}</div>}
     </div>
   )
 }
 
-export function ErrorState({ error, onRetry, className }: { error: unknown; onRetry?: () => void; className?: string }) {
-  const status = error instanceof ApiError ? error.status : null
-  const message = error instanceof Error ? error.message : 'Неизвестная ошибка'
-  const hint =
-    status === 400 ? 'В базе нет данных — сначала загрузите датасет.'
-    : status === 404 ? 'Объект не найден. Возможно, план был пересчитан.'
-    : status === null ? 'Бэкенд недоступен. Проверьте, что uvicorn запущен на :8000.'
-    : null
+/** Ошибка отвечает на три вопроса: что случилось, почему, что делать. */
+export function ErrorAlert({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   return (
-    <div className={cn('flex flex-col items-center px-6 py-12 text-center', className)}>
-      <div className="mb-3 grid size-10 place-items-center rounded-xl bg-danger-soft text-danger">
-        <AlertTriangle className="size-5" />
+    <div className="alert" role="alert">
+      <AlertCircle aria-hidden />
+      <div>
+        <div className="alert__title">{errorTitle(error)}</div>
+        <div>{errorHint(error)}</div>
+        {onRetry && (
+          <div className="alert__actions">
+            <Button size="sm" onClick={onRetry}>
+              Повторить
+            </Button>
+          </div>
+        )}
       </div>
-      <p className="text-sm font-semibold">{status ? `Ошибка ${status}` : 'Не удалось загрузить'}</p>
-      <p className="mt-1 max-w-md text-sm text-muted">{message}</p>
-      {hint && <p className="mt-1 max-w-md text-xs text-subtle">{hint}</p>}
-      {onRetry && (
-        <Button size="sm" className="mt-4" icon={<RotateCw className="size-3.5" />} onClick={onRetry}>
-          Повторить
-        </Button>
-      )}
     </div>
+  )
+}
+
+export function errorTitle(error: unknown) {
+  const msg = error instanceof Error ? error.message : String(error)
+  return error instanceof ApiError ? `${msg} (${error.status})` : msg
+}
+
+export function errorHint(error: unknown) {
+  const status = error instanceof ApiError ? error.status : null
+  if (status === 400) return 'В базе нет данных — сначала загрузите датасет.'
+  if (status === 404) return 'Объект не найден. Возможно, открыта устаревшая версия плана.'
+  if (status === 409) return 'Это действие уже выполнено ранее.'
+  if (status === 422) return 'Сервер не принял данные — проверьте введённое.'
+  if (status === null) return 'Сервер не ответил. Проверьте, что бэкенд запущен на :8000.'
+  return 'Попробуйте ещё раз.'
+}
+
+export function SkeletonRows({ rows = 6, cols = 5 }: { rows?: number; cols?: number }) {
+  return (
+    <table className="table" aria-busy="true" aria-label="Загрузка">
+      <tbody>
+        {Array.from({ length: rows }, (_, r) => (
+          <tr key={r}>
+            {Array.from({ length: cols }, (_, c) => (
+              <td key={c}>
+                <div className="skeleton" style={{ height: 12, width: c === 1 ? '80%' : '50%', animationDelay: `${r * 60}ms` }} />
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
   )
 }

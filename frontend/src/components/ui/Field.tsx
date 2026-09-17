@@ -1,53 +1,60 @@
 import { ChevronDown, Search } from 'lucide-react'
-import type { InputHTMLAttributes, SelectHTMLAttributes } from 'react'
-import { cn } from '@/lib/cn'
+import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
 
-const base =
-  'h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-fg placeholder:text-subtle transition focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/15'
-
-export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+export function Field({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }) {
   return (
-    <div className={className}>
-      <input className={base} {...rest} />
-    </div>
+    <label className="field">
+      <span className="field__label">{label}</span>
+      {children}
+      {hint && <span className="field__hint">{hint}</span>}
+    </label>
   )
 }
 
-export function SearchInput({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
+  return <input className="input" {...props} />
+}
+
+export function SearchInput({ style, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return (
-    <div className={cn('relative', className)}>
-      <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-subtle" />
-      <input type="search" className={cn(base, 'pl-8')} {...rest} />
-    </div>
+    <span className="input-wrap" style={style}>
+      <Search aria-hidden />
+      <input type="search" className="input" {...props} />
+    </span>
   )
 }
 
-interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
+export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return <textarea className="textarea" {...props} />
+}
+
+interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'size'> {
   options: { value: string; label: string }[]
-  placeholder?: string
+  size?: 'md' | 'sm'
+  width?: number | string
 }
 
-export function Select({ options, placeholder, className, ...rest }: SelectProps) {
+/** Нативный select: клавиатура, скринридеры и мобильные пикеры работают из коробки. */
+export function Select({ options, size = 'md', width, ...props }: SelectProps) {
   return (
-    <div className={cn('relative', className)}>
-      <select className={cn(base, 'appearance-none pr-8', !rest.value && 'text-muted')} {...rest}>
-        {placeholder != null && <option value="">{placeholder}</option>}
+    <span className={size === 'sm' ? 'select select--sm' : 'select'} style={{ width }}>
+      <select className="select__control" {...props}>
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>
         ))}
       </select>
-      <ChevronDown className="pointer-events-none absolute top-1/2 right-2.5 size-4 -translate-y-1/2 text-subtle" />
-    </div>
+      <ChevronDown aria-hidden />
+    </span>
   )
 }
 
-export function Label({ children, hint }: { children: React.ReactNode; hint?: React.ReactNode }) {
+export function Checkbox({ label, ...props }: InputHTMLAttributes<HTMLInputElement> & { label: ReactNode }) {
   return (
-    <div className="mb-1.5 flex items-baseline justify-between gap-2">
-      <span className="text-[13px] font-medium">{children}</span>
-      {hint && <span className="text-xs text-subtle">{hint}</span>}
-    </div>
+    <label className="check">
+      <input type="checkbox" {...props} />
+      {label}
+    </label>
   )
 }
