@@ -14,7 +14,8 @@ def anyio_backend():
 
 @pytest_asyncio.fixture()
 async def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("POSTCODE_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 't.db'}")
+    from src.core.config import settings
+    monkeypatch.setattr(settings, "database_url", f"sqlite+aiosqlite:///{tmp_path / 't.db'}")
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from src.core.config import settings
     import src.db.session as session_mod
@@ -48,11 +49,12 @@ async def test_cors_headers(client):
 @pytest.mark.asyncio
 async def test_cors_specific_origin(tmp_path, monkeypatch):
     """change 004: CORS_ORIGINS env — конкретный origin разрешён, прочие нет."""
-    monkeypatch.setenv("POSTCODE_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 't.db'}")
     import sys
+    from src.core.config import settings
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     import src.db.session as session_mod
-    from src.core.config import settings
+
+    monkeypatch.setattr(settings, "database_url", f"sqlite+aiosqlite:///{tmp_path / 't.db'}")
 
     # app считывает cors_origins при создании middleware — патчим singleton и перезагружаем модуль
     monkeypatch.setattr(settings, "cors_origins", "http://localhost:3000")

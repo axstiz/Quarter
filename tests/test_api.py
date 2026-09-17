@@ -15,18 +15,20 @@ def anyio_backend():
 
 @pytest_asyncio.fixture()
 async def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("POSTCODE_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 't.db'}")
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from src.core.config import settings
+    from src.db.session import init_db
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     import src.db.session as session_mod
+
+    # патчим singleton напрямую: setenv не работает — settings создан при первом импорте;
+    # изоляция по-тестовая СВОЯ tmp-БД (раньше маскировалась destructive reset'ом)
+    dsn = f"sqlite+aiosqlite:///{tmp_path / 't.db'}"
+    monkeypatch.setattr(settings, "database_url", dsn)
+    settings.dataset_dir = ROOT / "dataset"
 
     # каждый тест получает свой engine под свой tmp-DSN
     session_mod.engine = create_async_engine(settings.database_url, echo=False)
     session_mod.SessionLocal = async_sessionmaker(session_mod.engine, expire_on_commit=False)
-    from src.db.session import init_db
-    from src.core.config import settings
-
-    settings.dataset_dir = ROOT / "dataset"
     await init_db()
     from src.main import app
 
@@ -143,6 +145,33 @@ async def test_plans_versions_and_facts(client, sample_xlsx):
     r = await client.get(f"/api/v1/plans/{new_pid}")
     assert r.status_code == 200
     assert r.json()["parent_plan_id"] == pid
+
+
+@pytest.mark.asyncio
+async def test_reimport_preserves_plans(client):
+    """Фикс reset_dataset_tables: повторный импорт не затирает планы и факты."""
+    r = await client.post("/api/v1/data/import")
+    assert r.status_code == 200
+    r = await client.post("/api/v1/plans/generate")
+    assert r.status_code == 201
+    plan_id = r.json()["plan_id"]
+    r = await client.post(f"/api/v1/plans/{plan_id}/sprints/1/facts",
+                          json={"completed_sp": 5.0, "completed_task_ids": []})
+    assert r.status_code == 200
+
+    r = await client.post("/api/v1/data/import")
+    assert r.status_code == 200
+    counts = r.json()["counts"]
+    assert counts["tasks"] == 45
+
+    r = await client.get("/api/v1/plans")
+    plans = r.json()
+    assert len(plans) >= 2
+    r = await client.get(f"/api/v1/plans/{plan_id}")
+    assert r.status_code == 200 and r.json()["plan_id"] == plan_id
+    r = await client.get(f"/api/v1/plans/{plan_id}/facts")
+    facts = r.json()
+    assert any(f["sprint_no"] == 1 and f["completed_sp"] == 5.0 for f in facts)
 
 
 @pytest.fixture()

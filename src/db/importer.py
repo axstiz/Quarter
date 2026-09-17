@@ -9,13 +9,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import (
-    Base,
     DependencyORM,
     EngineerORM,
-    PlanItemORM,
-    PlanORM,
     RoleRequirementORM,
-    SprintFactORM,
     TaskORM,
     TeamHistoryORM,
 )
@@ -58,8 +54,10 @@ def read_csv(path: Path) -> list[dict[str, str]]:
 
 
 async def reset_dataset_tables(session: AsyncSession) -> None:
-    for model in (PlanItemORM, SprintFactORM, PlanORM, RoleRequirementORM,
-                  DependencyORM, EngineerORM, TeamHistoryORM, TaskORM):
+    """Повторный импорт очищает только импортные таблицы датасета:
+    планы и факты спринтов сохраняются (спека architecture). Справочники
+    reference_values/task_role_hours появятся с реализацией change 011."""
+    for model in (RoleRequirementORM, DependencyORM, EngineerORM, TeamHistoryORM, TaskORM):
         await session.execute(model.__table__.delete())
 
 

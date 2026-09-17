@@ -10,7 +10,8 @@ XLSX = ROOT / "Датасет_с_правками_основной.xlsx"
 
 @pytest_asyncio.fixture()
 async def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("POSTCODE_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 't.db'}")
+    from src.core.config import settings
+    monkeypatch.setattr(settings, "database_url", f"sqlite+aiosqlite:///{tmp_path / 't.db'}")
     await (0 and None) if False else None
     from src.db.session import engine, init_db
     from src.core.config import settings
