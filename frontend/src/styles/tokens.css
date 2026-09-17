@@ -1,0 +1,146 @@
+/*
+ * Токены. Названия — по смыслу в продукте: paper/sheet/well — поверхности ведомости,
+ * plan — единственный акцент, done/shift/over/pending — статусы решений планировщика.
+ */
+:root {
+  --font-ui: 'Onest', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Шкала 1.25 от 14px */
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-2xl: 22px;
+  --text-3xl: 28px;
+
+  /* Сетка 4px */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  --control-h: 32px;
+  --control-h-sm: 28px;
+  --row-h: 36px;
+  --sidebar-w: 220px;
+  --panel-w: 440px;
+  --topbar-h: 48px;
+
+  /* Движение (emil-design-eng): сильный ease-out, короткие длительности */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --d-press: 120ms;
+  --d-fast: 150ms;
+  --d-base: 200ms;
+  --d-panel: 260ms;
+
+  /* Светлая тема */
+  --paper: #fafaf9;
+  --sheet: #ffffff;
+  --well: #f2f2f0;
+  --hover: rgba(22, 24, 29, 0.04);
+  --press: rgba(22, 24, 29, 0.07);
+  --select: rgba(43, 95, 217, 0.08);
+
+  --ink: #16181d;
+  --ink-2: #484d57;
+  --ink-3: #676d78;
+  --ink-4: #9a9fa8;
+
+  --rule: rgba(22, 24, 29, 0.09);
+  --rule-strong: rgba(22, 24, 29, 0.16);
+
+  --plan: #2b5fd9;
+  --plan-hover: #2453c2;
+  --plan-ink: #1f4bb5;
+  --plan-soft: rgba(43, 95, 217, 0.1);
+  --on-plan: #ffffff;
+
+  --done: #1c7f53;
+  --done-soft: rgba(31, 138, 91, 0.1);
+  --shift: #955500;
+  --shift-soft: rgba(197, 122, 0, 0.13);
+  --over: #c0303a;
+  --over-soft: rgba(200, 50, 59, 0.1);
+  --pending: #ad4710;
+  --pending-soft: rgba(214, 102, 36, 0.12);
+
+  --shadow-lift: 0 0 0 1px rgba(22, 24, 29, 0.06), 0 8px 24px -6px rgba(22, 24, 29, 0.16), 0 2px 6px rgba(22, 24, 29, 0.06);
+  --focus-ring: 0 0 0 2px var(--paper), 0 0 0 4px var(--plan);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --paper: #0e0f12;
+    --sheet: #16181c;
+    --well: #0a0b0d;
+    --hover: rgba(255, 255, 255, 0.04);
+    --press: rgba(255, 255, 255, 0.07);
+    --select: rgba(109, 149, 245, 0.12);
+    --ink: #ecedef;
+    --ink-2: #b6bac1;
+    --ink-3: #8d929b;
+    --ink-4: #5f646d;
+    --rule: rgba(255, 255, 255, 0.08);
+    --rule-strong: rgba(255, 255, 255, 0.14);
+    --plan: #6d95f5;
+    --plan-hover: #82a5f7;
+    --plan-ink: #9db8fa;
+    --plan-soft: rgba(109, 149, 245, 0.14);
+    --on-plan: #0b0c0e;
+    --done: #4cc38a;
+    --done-soft: rgba(76, 195, 138, 0.12);
+    --shift: #e3a74b;
+    --shift-soft: rgba(227, 167, 75, 0.13);
+    --over: #f07179;
+    --over-soft: rgba(240, 113, 121, 0.13);
+    --pending: #ef8d55;
+    --pending-soft: rgba(239, 141, 85, 0.13);
+    --shadow-lift: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 32px -8px rgba(0, 0, 0, 0.6);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --paper: #0e0f12;
+  --sheet: #16181c;
+  --well: #0a0b0d;
+  --hover: rgba(255, 255, 255, 0.04);
+  --press: rgba(255, 255, 255, 0.07);
+  --select: rgba(109, 149, 245, 0.12);
+  --ink: #ecedef;
+  --ink-2: #b6bac1;
+  --ink-3: #8d929b;
+  --ink-4: #5f646d;
+  --rule: rgba(255, 255, 255, 0.08);
+  --rule-strong: rgba(255, 255, 255, 0.14);
+  --plan: #6d95f5;
+  --plan-hover: #82a5f7;
+  --plan-ink: #9db8fa;
+  --plan-soft: rgba(109, 149, 245, 0.14);
+  --on-plan: #0b0c0e;
+  --done: #4cc38a;
+  --done-soft: rgba(76, 195, 138, 0.12);
+  --shift: #e3a74b;
+  --shift-soft: rgba(227, 167, 75, 0.13);
+  --over: #f07179;
+  --over-soft: rgba(240, 113, 121, 0.13);
+  --pending: #ef8d55;
+  --pending-soft: rgba(239, 141, 85, 0.13);
+  --shadow-lift: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 32px -8px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
