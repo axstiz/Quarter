@@ -1,176 +1,162 @@
-import { BarChart3, GitCommitVertical, Info } from 'lucide-react'
-import { useCurrentPlanId, useFacts, useMetrics, usePlanVersions } from '@/api/queries'
-import { PageHeader } from '@/components/PageHeader'
+import { motion } from 'motion/react'
+import { BarChart3 } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { useCurrentPlanId, useFacts, useMetrics, usePlan, usePlanVersions } from '@/api/queries'
+import { AnimatedNumber } from '@/components/ui/AnimatedNumber'
 import { Badge } from '@/components/ui/Badge'
-import { Card, CardHeader } from '@/components/ui/Card'
-import { Skeleton } from '@/components/ui/Skeleton'
-import { EmptyState, ErrorState } from '@/components/ui/States'
-import { cn } from '@/lib/cn'
-import { fmt, formatDateTime, pct, shortId } from '@/lib/format'
+import { Button } from '@/components/ui/Button'
+import { Meter } from '@/components/ui/Meter'
+import { Empty, ErrorAlert, SkeletonRows } from '@/components/ui/States'
+import { fmt, formatDateTime, pct } from '@/lib/format'
+import { versionLabel } from '@/lib/labels'
+import { stagger } from '@/lib/motion'
 
 const SPRINTS = [1, 2, 3, 4, 5, 6]
 
 export function MetricsPage() {
   const planId = useCurrentPlanId()
+  const versions = usePlanVersions()
   const metrics = useMetrics(planId)
   const facts = useFacts(planId)
-  const versions = usePlanVersions()
-  const m = metrics.data
+  const [, setParams] = useSearchParams()
 
-  const header = <PageHeader title="Метрики квартала" description="Считаются от первоначального плана — пересчёты не подменяют базу сравнения" />
+  // База сравнения — первоначальный план в цепочке версий текущего плана
+  const list = versions.data ?? []
+  const chain: typeof list = []
+  for (let cur = list.find((v) => v.plan_id === planId); cur; cur = list.find((v) => v.plan_id === cur!.parent_plan_id)) chain.unshift(cur)
+  const initial = usePlan(chain[0]?.plan_id)
 
   if (planId === null) {
     return (
-      <>
-        {header}
-        <Card className="m-4 md:m-6">
-          <EmptyState icon={<BarChart3 className="size-6" />} title="Нет плана" description="Метрики появятся после генерации плана и загрузки факта спринтов." />
-        </Card>
-      </>
+      <div className="content">
+        <Empty
+          icon={<BarChart3 />}
+          title="Метрик пока нет"
+          text="Они появятся после построения плана и загрузки факта спринтов."
+          actions={
+            <Link to="/plan" className="btn btn--primary" style={{ textDecoration: 'none' }}>
+              <span className="btn__label">К плану квартала</span>
+            </Link>
+          }
+        />
+      </div>
     )
   }
 
-  const factValues = SPRINTS.map((n) => (m && !m.sprint_completion_is_forecast[n] ? m.sprint_completion_pct[n] : null)).filter((v): v is number => v != null)
-  const avg = factValues.length ? factValues.reduce((s, v) => s + v, 0) / factValues.length : null
+  const m = metrics.data
+  const plannedSp = (n: number) => initial.data?.sprints.find((s) => s.sprint_no === n)?.tasks.reduce((a, x) => a + (x.step_points_sp ?? 0), 0)
+  const fact = (n: number) => facts.data?.find((f) => f.sprint_no === n)
+  const factSprints = SPRINTS.filter((n) => m && !m.sprint_completion_is_forecast[n])
+  const avg = factSprints.length && m ? factSprints.reduce((a, n) => a + (m.sprint_completion_pct[n] ?? 0), 0) / factSprints.length : null
 
   return (
-    <>
-      {header}
-      <div className="space-y-4 p-4 md:p-6">
-        {metrics.isError ? (
-          <Card>
-            <ErrorState error={metrics.error} onRetry={() => metrics.refetch()} />
-          </Card>
-        ) : (
-          <>
-            <div className="grid gap-3 md:grid-cols-3">
-              <Card className="p-5 md:col-span-1">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-muted">Выполнение квартала</p>
-                  {m && <ForecastBadge forecast={m.quarter_completion_is_forecast} />}
-                </div>
-                {m ? (
-                  <>
-                    <p className="mt-2 text-4xl font-semibold tracking-tight tabular-nums">{pct(m.quarter_completion_pct)}</p>
-                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface-2">
-                      <div
-                        className={cn('h-full rounded-full transition-[width] duration-700', m.quarter_completion_is_forecast ? 'bg-[repeating-linear-gradient(45deg,var(--accent)_0_6px,color-mix(in_srgb,var(--accent)_55%,transparent)_6px_12px)]' : 'bg-accent')}
-                        style={{ width: `${Math.min(m.quarter_completion_pct ?? 0, 100)}%` }}
-                      />
-                    </div>
-                    <p className="mt-2 text-xs text-subtle">Завершённые инициативы / инициативы первоначального плана</p>
-                  </>
-                ) : (
-                  <Skeleton className="mt-3 h-14" />
-                )}
-              </Card>
-              <Card className="p-5">
-                <p className="text-sm font-medium text-muted">Спринтов с фактом</p>
-                {facts.data ? <p className="mt-2 text-4xl font-semibold tabular-nums">{facts.data.length}<span className="text-xl text-subtle"> / 6</span></p> : <Skeleton className="mt-3 h-10 w-20" />}
-                <p className="mt-2 text-xs text-subtle">Остальные спринты — прогноз</p>
-              </Card>
-              <Card className="p-5">
-                <p className="text-sm font-medium text-muted">Среднее выполнение спринта</p>
-                {m ? <p className="mt-2 text-4xl font-semibold tabular-nums">{pct(avg)}</p> : <Skeleton className="mt-3 h-10 w-24" />}
-                <p className="mt-2 text-xs text-subtle">Факт SP / первоначально запланированные SP</p>
-              </Card>
-            </div>
-
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-              <Card>
-                <CardHeader
-                  title="Выполнение по спринтам"
-                  hint="Сплошной столбец — факт, штриховка — прогноз (значение появится после загрузки факта)"
-                />
-                <div className="px-4 pb-5">
-                  {!m ? (
-                    <Skeleton className="h-64" />
-                  ) : (
-                    <SprintBars pctBySprint={m.sprint_completion_pct} forecast={m.sprint_completion_is_forecast} />
-                  )}
-                </div>
-              </Card>
-
-              <Card>
-                <CardHeader title="История версий плана" hint="Снапшоты: первичный → пересчёты по факту" />
-                <ol className="relative mx-4 mb-4 space-y-4 border-l border-border pl-5">
-                  {versions.isLoading && <Skeleton className="h-24" />}
-                  {versions.data?.map((v) => (
-                    <li key={v.plan_id} className="relative">
-                      <span className={cn('absolute top-0.5 -left-[27px] grid size-3.5 place-items-center rounded-full border-2 bg-surface', v.plan_id === planId ? 'border-accent' : 'border-border')}>
-                        <GitCommitVertical className="size-2 text-subtle" />
-                      </span>
-                      <p className="text-[13px] font-medium">
-                        {v.is_initial ? 'Первичный план' : `Пересчёт после спринта ${v.recomputed_after_sprint}`}
-                        {v.is_initial && <Badge tone="accent" className="ml-2">база метрик</Badge>}
-                      </p>
-                      <p className="font-mono text-[11px] text-subtle">
-                        {shortId(v.plan_id)} · {formatDateTime(v.created_at)}
-                      </p>
-                    </li>
-                  ))}
-                </ol>
-              </Card>
-            </div>
-
-            <div className="flex items-start gap-2 rounded-xl border border-border bg-surface p-3 text-xs text-muted">
-              <Info className="mt-px size-3.5 shrink-0 text-accent" />
-              Значения до конца квартала помечены «прогноз». Знаменатель всегда берётся из первоначального плана (is_initial), даже если после пересчётов состав изменился.
-            </div>
-          </>
-        )}
+    <div className="content">
+      <div className="page-head">
+        <div>
+          <h1>Метрики квартала</h1>
+          <div className="page-head__sub">Считаются от первоначального плана — пересчёты не подменяют базу сравнения</div>
+        </div>
       </div>
-    </>
+
+      {metrics.error ? (
+        <ErrorAlert error={metrics.error} onRetry={() => metrics.refetch()} />
+      ) : !m ? (
+        <SkeletonRows rows={7} cols={5} />
+      ) : (
+        <>
+          <div className="block" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+            <Kpi label="Выполнение квартального плана" hint="завершённые инициативы / инициативы первоначального плана" forecast={m.quarter_completion_is_forecast}>
+              <AnimatedNumber value={m.quarter_completion_pct} suffix="%" />
+            </Kpi>
+            <Kpi label="Среднее выполнение спринта" hint="факт SP / первоначально запланированные SP" forecast={false} border>
+              {avg == null ? '—' : <AnimatedNumber value={Math.round(avg * 10) / 10} suffix="%" />}
+            </Kpi>
+            <Kpi label="Спринтов с фактом" hint="остальные значения — прогноз" forecast={false} border>
+              <AnimatedNumber value={facts.data?.length ?? 0} />
+              <span className="muted" style={{ fontSize: 'var(--text-lg)' }}> / 6</span>
+            </Kpi>
+          </div>
+
+          <section className="section">
+            <div className="section__head">
+              <h2>Выполнение по спринтам</h2>
+              <span className="section__hint">знаменатель — SP первоначального плана</span>
+            </div>
+            <div className="block scroll-x">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Спринт</th>
+                    <th>Выполнено / запланировано</th>
+                    <th className="num">Выполнение</th>
+                    <th>Значение</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {SPRINTS.map((n, i) => {
+                    const forecast = m.sprint_completion_is_forecast[n]
+                    return (
+                      <motion.tr key={n} data-forecast={forecast || undefined} initial={{ opacity: 0 }} animate={{ opacity: 1, transition: stagger(i) }}>
+                        <td className="nowrap">Спринт {n}</td>
+                        <td>{forecast ? <span className="muted tabular">— / {fmt(plannedSp(n))} SP</span> : <Meter value={fact(n)?.completed_sp ?? 0} max={plannedSp(n)} unit=" SP" label={`Спринт ${n}`} />}</td>
+                        <td className="num tabular" style={{ fontWeight: forecast ? 400 : 600 }}>
+                          {pct(m.sprint_completion_pct[n])}
+                        </td>
+                        <td>{forecast ? <Badge tone="neutral">прогноз</Badge> : <Badge tone="done">факт</Badge>}</td>
+                      </motion.tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      )}
+
+      <section className="section">
+        <div className="section__head">
+          <h2>История версий плана</h2>
+          <span className="section__hint">{chain.length} в цепочке</span>
+        </div>
+        <div className="block scroll-x">
+          <table className="table table--compact">
+            <tbody>
+              {chain.map((v) => (
+                <tr key={v.plan_id} aria-selected={v.plan_id === planId}>
+                  <td>
+                    {versionLabel(v)} {v.is_initial && <Badge tone="plan">база метрик</Badge>}
+                  </td>
+                  <td className="muted tabular nowrap">{formatDateTime(v.created_at)}</td>
+                  <td className="num">
+                    {v.plan_id === planId ? (
+                      <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                        открыта
+                      </span>
+                    ) : (
+                      <Button size="sm" variant="ghost" onClick={() => setParams({ plan: v.plan_id })}>
+                        Открыть
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
   )
 }
 
-function ForecastBadge({ forecast }: { forecast: boolean }) {
-  return forecast ? <Badge tone="warn">прогноз</Badge> : <Badge tone="ok">факт</Badge>
-}
-
-function SprintBars({ pctBySprint, forecast }: { pctBySprint: Record<string, number | null>; forecast: Record<string, boolean> }) {
-  const max = Math.max(100, ...SPRINTS.map((n) => pctBySprint[n] ?? 0))
+function Kpi({ label, hint, forecast, border, children }: { label: string; hint: string; forecast: boolean; border?: boolean; children: React.ReactNode }) {
   return (
-    <div>
-      <div className="relative flex h-64 items-end gap-3 border-b border-border pt-6 sm:gap-5">
-        {[100, 50].map((line) => (
-          <div key={line} className="pointer-events-none absolute inset-x-0 border-t border-dashed border-border" style={{ bottom: `${(line / max) * 100}%` }}>
-            <span className="absolute -top-4 right-0 text-[10px] text-subtle">{line}%</span>
-          </div>
-        ))}
-        {SPRINTS.map((n) => {
-          const value = pctBySprint[n]
-          const isForecast = forecast[n]
-          const height = value != null ? (value / max) * 100 : 18
-          return (
-            <div key={n} className="group relative flex h-full flex-1 flex-col justify-end">
-              <span className={cn('mb-1 text-center text-xs font-semibold tabular-nums', isForecast && 'text-subtle')}>
-                {value != null ? `${fmt(value)}%` : '—'}
-              </span>
-              <div
-                className={cn(
-                  'rounded-t-md transition-[height] duration-700',
-                  isForecast
-                    ? 'border border-dashed border-border bg-[repeating-linear-gradient(135deg,var(--surface-2)_0_6px,transparent_6px_12px)]'
-                    : value != null && value >= 80
-                      ? 'bg-accent'
-                      : 'bg-warn',
-                )}
-                style={{ height: `${height}%` }}
-                title={isForecast ? 'прогноз' : 'факт'}
-              />
-            </div>
-          )
-        })}
+    <div style={{ padding: 'var(--s-4)', borderLeft: border ? '1px solid var(--rule)' : undefined }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+        <span className="stat__label">{label}</span>
+        {forecast && <Badge tone="shift">прогноз</Badge>}
       </div>
-      <div className="mt-2 flex gap-3 sm:gap-5">
-        {SPRINTS.map((n) => (
-          <div key={n} className="flex-1 text-center">
-            <p className="text-xs font-medium">S{n}</p>
-            <p className={cn('text-[10px]', forecast[n] ? 'text-warn' : 'text-ok')}>{forecast[n] ? 'прогноз' : 'факт'}</p>
-          </div>
-        ))}
-      </div>
+      <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 600, letterSpacing: '-0.02em', marginTop: 4 }}>{children}</div>
+      <div className="section__hint">{hint}</div>
     </div>
   )
 }
