@@ -1,27 +1,29 @@
-import type { BusFactorReport, PlanTask } from '@/api/types'
+import type { BusFactorReport } from '@/api/types'
+import type { TaskSummary } from '@/lib/planModel'
 
 export interface RiskEntry {
-  task: PlanTask
-  competencies: { key: string; holder: string }[]
+  task: TaskSummary
+  roles: { role: string; holder: string }[]
+}
+
+/** Роль (в нижнем регистре) → носители по всей компании. */
+export function companyRoleHolders(report: BusFactorReport | undefined): Map<string, string[]> {
+  return new Map((report?.items ?? []).filter((i) => i.scope_type === 'company').map((i) => [i.key.toLowerCase(), i.holders]))
 }
 
 /**
- * Задачи плана под угрозой Bus Factor.
- * Отдельной ручки нет: сопоставляем роли из role_hours задачи с ролями company-scope,
- * у которых factor ≤ 1. Когда бэк отдаст готовый список — заменить этот расчёт.
+ * Задачи плана (каждая один раз), зависящие от роли с единственным носителем в компании.
+ * Отдельной ручки в API нет — считаем по role_hours задачи и /bus-factor.
  */
-export function tasksAtRisk(tasks: PlanTask[], report: BusFactorReport | undefined): RiskEntry[] {
-  if (!report) return []
-  const single = new Map(
-    report.items.filter((i) => i.scope_type === 'company' && i.factor <= 1).map((i) => [i.key.toLowerCase(), i.holders[0] ?? '—']),
-  )
+export function tasksAtRisk(tasks: Iterable<TaskSummary>, report: BusFactorReport | undefined): RiskEntry[] {
+  const holders = companyRoleHolders(report)
   const out: RiskEntry[] = []
   for (const task of tasks) {
     if (task.decision === 'done_actual' || task.decision === 'cancelled') continue
-    const competencies = Object.keys(task.role_hours)
-      .filter((role) => single.has(role.toLowerCase()))
-      .map((role) => ({ key: role, holder: single.get(role.toLowerCase())! }))
-    if (competencies.length) out.push({ task, competencies })
+    const roles = Object.keys(task.role_hours)
+      .filter((r) => holders.get(r.toLowerCase())?.length === 1)
+      .map((r) => ({ role: r, holder: holders.get(r.toLowerCase())![0] }))
+    if (roles.length) out.push({ task, roles })
   }
   return out
 }
