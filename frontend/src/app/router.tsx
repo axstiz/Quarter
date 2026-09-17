@@ -1,21 +1,40 @@
+import { lazy, Suspense, type ReactNode } from 'react'
 import { createBrowserRouter, Navigate } from 'react-router-dom'
-import { LoginPage } from '@/features/auth/LoginPage'
-import { MetricsPage } from '@/features/metrics/MetricsPage'
-import { PlanPage } from '@/features/plan/PlanPage'
-import { SprintPage } from '@/features/sprint/SprintPage'
-import { StarMapPage } from '@/features/star-map/StarMapPage'
-import { AppLayout } from './AppLayout'
+import { SkeletonRows } from '@/components/ui/States'
+import { Layout } from './Layout'
+
+// Страницы грузятся по требованию: первый экран не тянет код остальных разделов
+const PlanPage = lazy(() => import('@/features/plan/PlanPage').then((m) => ({ default: m.PlanPage })))
+const SprintFactPage = lazy(() => import('@/features/sprint/SprintFactPage').then((m) => ({ default: m.SprintFactPage })))
+const TeamMapPage = lazy(() => import('@/features/team-map/TeamMapPage').then((m) => ({ default: m.TeamMapPage })))
+const MetricsPage = lazy(() => import('@/features/metrics/MetricsPage').then((m) => ({ default: m.MetricsPage })))
+const ImportPage = lazy(() => import('@/features/import/ImportPage').then((m) => ({ default: m.ImportPage })))
+const LoginPage = lazy(() => import('@/features/auth/LoginPage').then((m) => ({ default: m.LoginPage })))
+
+const page = (el: ReactNode) => (
+  <Suspense
+    fallback={
+      <div className="content">
+        <div className="skeleton" style={{ width: 220, height: 24, marginBottom: 24 }} />
+        <SkeletonRows rows={8} cols={5} />
+      </div>
+    }
+  >
+    {el}
+  </Suspense>
+)
 
 export const router = createBrowserRouter([
-  { path: '/login', element: <LoginPage /> },
+  { path: '/login', element: page(<LoginPage />) },
   {
-    element: <AppLayout />,
+    element: <Layout />,
     children: [
       { index: true, element: <Navigate to="/plan" replace /> },
-      { path: '/plan', element: <PlanPage /> },
-      { path: '/sprint', element: <SprintPage /> },
-      { path: '/star-map', element: <StarMapPage /> },
-      { path: '/metrics', element: <MetricsPage /> },
+      { path: '/plan', element: page(<PlanPage />) },
+      { path: '/sprint', element: page(<SprintFactPage />) },
+      { path: '/team-map', element: page(<TeamMapPage />) },
+      { path: '/metrics', element: page(<MetricsPage />) },
+      { path: '/import', element: page(<ImportPage />) },
       { path: '*', element: <Navigate to="/plan" replace /> },
     ],
   },

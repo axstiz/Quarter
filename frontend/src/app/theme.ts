@@ -1,31 +1,24 @@
 import { useState } from 'react'
 
 type Theme = 'light' | 'dark'
-const KEY = 'theme'
 
-function read(): Theme {
-  try {
-    const saved = localStorage.getItem(KEY)
-    if (saved === 'light' || saved === 'dark') return saved
-  } catch {
-    /* storage недоступен */
-  }
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
+const systemTheme = (): Theme => (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
 
-export function initTheme() {
-  document.documentElement.dataset.theme = read()
-}
-
+/** Тема по системе; ручной выбор запоминается. localStorage может быть недоступен — не падаем. */
 export function useTheme() {
-  const [theme, setTheme] = useState<Theme>(read)
+  const [theme, setTheme] = useState<Theme>(() => (document.documentElement.dataset.theme as Theme) || systemTheme())
   const toggle = () => {
-    const next = theme === 'dark' ? 'light' : 'dark'
-    document.documentElement.dataset.theme = next
+    const next: Theme = theme === 'dark' ? 'light' : 'dark'
+    const apply = () => {
+      document.documentElement.dataset.theme = next
+    }
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (document.startViewTransition && !reduce) document.startViewTransition(apply)
+    else apply()
     try {
-      localStorage.setItem(KEY, next)
+      localStorage.setItem('theme', next)
     } catch {
-      /* storage недоступен */
+      /* приватный режим */
     }
     setTheme(next)
   }
