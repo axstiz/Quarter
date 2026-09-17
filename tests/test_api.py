@@ -205,6 +205,43 @@ async def test_manual_records_survive_reimport(client):
     assert r.status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_crud_teams_dependencies_full(client):
+    """fix-crud-teams-dependencies: PUT/DELETE для teams и dependencies (по паре)."""
+    await client.post("/api/v1/data/import")
+
+    r = await client.post("/api/v1/teams", json={"team_id": "Team-NEW", "name": "Новая"})
+    assert r.status_code == 201
+    r = await client.put("/api/v1/teams/Team-NEW", json={"name": "Переименованная"})
+    assert r.status_code == 200 and r.json()["source"] == "manual"
+    r = await client.put("/api/v1/teams/NOPE-404", json={"name": "X"})
+    assert r.status_code == 404
+    r = await client.put("/api/v1/teams/Team-NEW", json={"name": ""})
+    assert r.status_code == 422
+
+    pair = {"blocking_task_id": "MP-101", "blocked_task_id": "MP-102"}
+    r = await client.get("/api/v1/dependencies")
+    assert any(d["blocking_task_id"] == "MP-101" and d["blocked_task_id"] == "MP-102"
+               for d in r.json())
+
+    r = await client.put("/api/v1/dependencies",
+                         params=dict(blocking_task_id="MP-101", blocked_task_id="MP-102"),
+                         json={"dependency_type": "depends on"})
+    assert r.status_code == 200 and r.json()["dependency_type"] == "depends on"
+    r = await client.put("/api/v1/dependencies",
+                         params={"blocking_task_id": "NOPE", "blocked_task_id": "NOPE"},
+                         json={"dependency_type": "x"})
+    assert r.status_code == 404
+
+    r = await client.delete("/api/v1/dependencies", params=pair)
+    assert r.status_code == 200
+    r = await client.get("/api/v1/dependencies")
+    assert not any(d["blocking_task_id"] == "MP-101" and d["blocked_task_id"] == "MP-102"
+                   for d in r.json())
+    r = await client.delete("/api/v1/dependencies", params=pair)
+    assert r.status_code == 404
+
+
 @pytest.fixture()
 def sample_xlsx():
     from pathlib import Path as _P

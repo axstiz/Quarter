@@ -37,8 +37,12 @@ class DependencyIn(BaseModel):
     dependency_type: str | None = None
 
 
+class DependencyTypeIn(BaseModel):
+    dependency_type: str | None = None
+
+
 class TeamIn(BaseModel):
-    team_id: str
+    team_id: str | None = None
     name: str | None = None
 
 
@@ -143,6 +147,8 @@ async def create_dependency(body: DependencyIn, session: AsyncSession = Depends(
 
 @router.post("/teams", status_code=201)
 async def create_team(body: TeamIn, session: AsyncSession = Depends(get_session)):
+    if not body.team_id:
+        raise HTTPException(status_code=422, detail="team_id обязателен")
     existing = (await session.execute(select(TeamORM).where(TeamORM.team_id == body.team_id))).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=409, detail="команда уже существует")
@@ -151,8 +157,56 @@ async def create_team(body: TeamIn, session: AsyncSession = Depends(get_session)
     return {"status": "created", "team_id": body.team_id}
 
 
+@router.put("/teams/{team_id}")
+async def update_team(team_id: str, body: TeamIn, session: AsyncSession = Depends(get_session)):
+    team = (await session.execute(select(TeamORM).where(TeamORM.team_id == team_id))).scalar_one_or_none()
+    if not team:
+        raise HTTPException(status_code=404, detail="команда не найдена")
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name обязателен для переименования")
+    team.name = name
+    team.source = "manual"
+    await session.commit()
+    return {"status": "updated", "team_id": team_id, "name": name, "source": "manual"}
+
+
 @router.delete("/teams/{team_id}")
 async def delete_team(team_id: str, session: AsyncSession = Depends(get_session)):
     await session.execute(delete(TeamORM).where(TeamORM.team_id == team_id))
     await session.commit()
     return {"status": "deleted"}
+
+
+@router.put("/dependencies")
+async def update_dependency(blocking_task_id: str, blocked_task_id: str,
+                            body: DependencyTypeIn,
+                            session: AsyncSession = Depends(get_session)):
+    """Правка типа зависимости по паре задач (решение лида: идентификация по паре,
+    не по суррогатному uid). Правка делает запись ручной (source=manual)."""
+    dep = (await session.execute(select(DependencyORM).where(
+        DependencyORM.blocking_task_id == blocking_task_id,
+        DependencyORM.blocked_task_id == blocked_task_id))).scalar_one_or_none()
+    if not dep:
+        raise HTTPException(status_code=404, detail="зависимость не найдена")
+    if body.dependency_type:
+        dep.dependency_type = body.dependency_type
+    dep.source = "manual"
+    await session.commit()
+    return {"status": "updated", "blocking_task_id": blocking_task_id,
+            "blocked_task_id": blocked_task_id, "dependency_type": dep.dependency_type}
+
+
+@router.delete("/dependencies")
+async def delete_dependency(blocking_task_id: str, blocked_task_id: str,
+                            session: AsyncSession = Depends(get_session)):
+    dep = (await session.execute(select(DependencyORM).where(
+        DependencyORM.blocking_task_id == blocking_task_id,
+        DependencyORM.blocked_task_id == blocked_task_id))).scalar_one_or_none()
+    if not dep:
+        raise HTTPException(status_code=404, detail="зависимость не найдена")
+    await session.execute(delete(DependencyORM).where(
+        DependencyORM.blocking_task_id == blocking_task_id,
+        DependencyORM.blocked_task_id == blocked_task_id))
+    await session.commit()
+    return {"status": "deleted", "blocking_task_id": blocking_task_id, "blocked_task_id": blocked_task_id}
