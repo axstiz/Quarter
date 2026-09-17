@@ -95,7 +95,7 @@ class JobState(TypedDict, total=False):
 
 
 class UploadJob:
-    """In-memory job. Ответы/превью хранятся вместе с job."""
+    """Persistent job with in-memory caching. Ответы/превью хранятся в БД и памяти."""
 
     JOBS: dict[str, "UploadJob"] = {}
 
@@ -110,6 +110,7 @@ class UploadJob:
         self.column_guesses: list[dict] = []
         self.questions: list[Question] = []
         self.preview: dict[str, int] = {}
+        self.answers: dict[str, str] = {}
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -121,6 +122,83 @@ class UploadJob:
             "unmapped": self.unmapped_columns,
             "preview_counts": {k: len(v) for k, v in self.rows_by_entity.items()},
         }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "job_id": self.job_id,
+            "filename": self.filename,
+            "file_path": str(self.path),
+            "status": self.status,
+            "tables": self.tables,
+            "rows_by_entity": self.rows_by_entity,
+            "unmapped_columns": self.unmapped_columns,
+            "column_guesses": self.column_guesses,
+            "questions": [q.model_dump() for q in self.questions],
+            "answers": self.answers,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "UploadJob":
+        job = cls(data["job_id"], data["filename"], Path(data.get("file_path", "")))
+        job.status = data.get("status", "uploaded")
+        job.tables = data.get("tables") or []
+        job.rows_by_entity = data.get("rows_by_entity") or {}
+        job.unmapped_columns = data.get("unmapped_columns") or []
+        job.column_guesses = data.get("column_guesses") or []
+        q_raw = data.get("questions") or []
+        job.questions = [Question.model_validate(q) if isinstance(q, dict) else q for q in q_raw]
+        job.answers = data.get("answers") or {}
+        job.preview = {k: len(v) for k, v in job.rows_by_entity.items()}
+        return job
+
+
+async def save_job_db(session, job: UploadJob) -> None:
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    from src.db.models import UploadJobORM
+
+    UploadJob.JOBS[job.job_id] = job
+    d = job.to_dict()
+    orm = await session.get(UploadJobORM, job.job_id)
+    if not orm:
+        orm = UploadJobORM(job_id=job.job_id)
+        session.add(orm)
+    orm.filename = d["filename"]
+    orm.file_path = d["file_path"]
+    orm.status = d["status"]
+    orm.tables = d["tables"]
+    orm.rows_by_entity = d["rows_by_entity"]
+    orm.unmapped_columns = d["unmapped_columns"]
+    orm.column_guesses = d["column_guesses"]
+    orm.questions = d["questions"]
+    orm.answers = d["answers"]
+    await session.commit()
+
+
+async def get_job_db(session, job_id: str) -> UploadJob | None:
+    if job_id in UploadJob.JOBS:
+        return UploadJob.JOBS[job_id]
+
+    from src.db.models import UploadJobORM
+    orm = await session.get(UploadJobORM, job_id)
+    if not orm:
+        return None
+
+    data = {
+        "job_id": orm.job_id,
+        "filename": orm.filename,
+        "file_path": orm.file_path,
+        "status": orm.status,
+        "tables": orm.tables,
+        "rows_by_entity": orm.rows_by_entity,
+        "unmapped_columns": orm.unmapped_columns,
+        "column_guesses": orm.column_guesses,
+        "questions": orm.questions,
+        "answers": orm.answers,
+    }
+    job = UploadJob.from_dict(data)
+    UploadJob.JOBS[job.job_id] = job
+    return job
+
 
 
 # --- LangGraph-узлы ---------------------------------------------------------

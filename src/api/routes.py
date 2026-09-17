@@ -208,43 +208,45 @@ JOBS_TMP_DIR.mkdir(exist_ok=True)
 
 
 @router.post("/data/upload", status_code=201)
-async def data_upload(file: UploadFile = File(...)) -> dict:
+async def data_upload(file: UploadFile = File(...), session: AsyncSession = Depends(get_session)) -> dict:
     """Загрузка файла xlsx/csv/json в пайплайн normalization."""
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in (".xlsx", ".csv", ".json"):
         raise HTTPException(status_code=422, detail=f"поддерживаются xlsx/csv/json, получен {suffix}")
     dest = JOBS_TMP_DIR / f"{uuid.uuid4().hex}{suffix}"
     dest.write_bytes(await file.read())
-    from src.ai.pipelines.normalization import new_job, UploadJob
+    from src.ai.pipelines.normalization import new_job, save_job_db
 
     try:
         job = new_job(file.filename or dest.name, dest)
+        await save_job_db(session, job)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"не удалось разобрать файл: {e}")
     return job.snapshot()
 
 
 @router.get("/data/jobs/{job_id}")
-async def job_status(job_id: str) -> dict:
-    from src.ai.pipelines.normalization import UploadJob
+async def job_status(job_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+    from src.ai.pipelines.normalization import get_job_db
 
-    job = UploadJob.JOBS.get(job_id)
+    job = await get_job_db(session, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job не найден")
     return job.snapshot()
 
 
 @router.post("/data/jobs/{job_id}/answers")
-async def job_answers(job_id: str, body: dict) -> dict:
+async def job_answers(job_id: str, body: dict, session: AsyncSession = Depends(get_session)) -> dict:
     """Ответы на вопросы маппинга: {колонка: "entity.field" | "пропустить"}"""
-    from src.ai.pipelines.normalization import UploadJob, run_stage
+    from src.ai.pipelines.normalization import get_job_db, run_stage, save_job_db
 
-    job = UploadJob.JOBS.get(job_id)
+    job = await get_job_db(session, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job не найден")
     answers = body.get("answers", {})
     try:
         run_stage(job, answers)
+        await save_job_db(session, job)
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e))
     return job.snapshot()
@@ -253,10 +255,10 @@ async def job_answers(job_id: str, body: dict) -> dict:
 @router.post("/data/jobs/{job_id}/confirm")
 async def job_confirm(job_id: str, session: AsyncSession = Depends(get_session)) -> dict:
     """Импорт в БД с merge-правилами (manual не затирается)."""
-    from src.ai.pipelines.normalization import UploadJob
+    from src.ai.pipelines.normalization import get_job_db, save_job_db
     from src.db.staging import stage_import
 
-    job = UploadJob.JOBS.get(job_id)
+    job = await get_job_db(session, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job не найден")
     if job.status != "ready":
@@ -267,18 +269,20 @@ async def job_confirm(job_id: str, session: AsyncSession = Depends(get_session))
         await session.rollback()
         raise HTTPException(status_code=422, detail=f"ошибка импорта: {e}")
     job.status = "confirmed"
+    await save_job_db(session, job)
     return {"status": "confirmed", "counts": counts}
 
 
 @router.post("/ai/normalize/{job_id}")
-async def ai_rerun(job_id: str) -> dict:
+async def ai_rerun(job_id: str, session: AsyncSession = Depends(get_session)) -> dict:
     """Повторный прогон пайплайна (после ответов или без них)."""
-    from src.ai.pipelines.normalization import UploadJob, run_stage
+    from src.ai.pipelines.normalization import get_job_db, run_stage, save_job_db
 
-    job = UploadJob.JOBS.get(job_id)
+    job = await get_job_db(session, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job не найден")
     run_stage(job)
+    await save_job_db(session, job)
     return job.snapshot()
 
 
