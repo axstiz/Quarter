@@ -530,6 +530,19 @@ async def task_explanation(plan_id: str, task_id: str, session: AsyncSession = D
     }
 
 
+@router.get("/plans/{plan_id}/bus-risk")
+async def plan_bus_risk_endpoint(plan_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+    plan_orm = await get_plan_orm(session, plan_id)
+    if not plan_orm:
+        raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
+    items = await get_plan_items(session, plan_id)
+    planned = [{"task_id": i.task_id, "sprint_no": i.sprint_no} for i in items
+               if i.decision == PlanDecision.planned.value]
+    tasks, engineers, history, deps = await load_world(session)
+    from src.services.bus_factor import plan_bus_risk
+    return plan_bus_risk(planned, tasks, engineers)
+
+
 @router.get("/bus-factor")
 async def bus_factor(session: AsyncSession = Depends(get_session)) -> dict:
     tasks, engineers, history, deps = await load_world(session)
