@@ -26,9 +26,28 @@ def _uid() -> str:
     return uuid.uuid4().hex
 
 
+class WorkspaceORM(Base):
+    __tablename__ = "workspaces"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
+    name: Mapped[str] = mapped_column(String)
+    created_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now())
+
+
+class MembershipORM(Base):
+    __tablename__ = "memberships"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
+    workspace_id: Mapped[str] = mapped_column(String, index=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    role: Mapped[str] = mapped_column(String, default="editor")  # admin, editor, reader
+    created_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now())
+    __table_args__ = (UniqueConstraint("workspace_id", "user_id", name="uq_workspace_user"),)
+
+
 class TaskORM(Base):
     __tablename__ = "tasks"
     task_id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
     source: Mapped[str] = mapped_column(String, default="imported")
     priority: Mapped[int] = mapped_column(Integer, default=100)
     parent_id: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -43,6 +62,7 @@ class TaskORM(Base):
 
 class RoleRequirementORM(Base):
     __tablename__ = "task_role_requirements"
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
     source: Mapped[str] = mapped_column(String, default="imported")
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
     task_id: Mapped[str] = mapped_column(String, index=True)
@@ -52,6 +72,7 @@ class RoleRequirementORM(Base):
 
 class DependencyORM(Base):
     __tablename__ = "task_dependencies"
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
     source: Mapped[str] = mapped_column(String, default="imported")
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
     blocking_task_id: Mapped[str] = mapped_column(String, index=True)
@@ -61,6 +82,7 @@ class DependencyORM(Base):
 
 class EngineerORM(Base):
     __tablename__ = "engineers_profiles"
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
     source: Mapped[str] = mapped_column(String, default="imported")
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
     engineer_id: Mapped[str] = mapped_column(String, index=True)
@@ -73,6 +95,7 @@ class EngineerORM(Base):
 
 class TeamHistoryORM(Base):
     __tablename__ = "team_history"
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
     source: Mapped[str] = mapped_column(String, default="imported")
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
     snapshot_date: Mapped[date] = mapped_column(Date)
@@ -83,6 +106,7 @@ class TeamHistoryORM(Base):
 
 class TeamORM(Base):
     __tablename__ = "teams"
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
     team_id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, default="")
     source: Mapped[str] = mapped_column(String, default="manual")
@@ -90,6 +114,7 @@ class TeamORM(Base):
 
 class PlanORM(Base):
     __tablename__ = "plans"
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
     plan_id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
     created_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now())
     is_initial: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -99,6 +124,7 @@ class PlanORM(Base):
 
 class PlanItemORM(Base):
     __tablename__ = "plan_items"
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
     plan_id: Mapped[str] = mapped_column(ForeignKey("plans.plan_id"), index=True)
     task_id: Mapped[str] = mapped_column(String, index=True)
@@ -111,6 +137,7 @@ class PlanItemORM(Base):
 
 class SprintFactORM(Base):
     __tablename__ = "sprint_facts"
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
     plan_id: Mapped[str] = mapped_column(ForeignKey("plans.plan_id"), index=True)
     sprint_no: Mapped[int] = mapped_column(Integer)
@@ -143,4 +170,3 @@ class UploadJobORM(Base):
     answers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now())
     updated_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now(), onupdate=func.now())
-

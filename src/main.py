@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.api.routes import api_router
 from src.api.crud import router as crud_router
 from src.api.auth import auth_router
+from src.api.workspaces import workspace_router
 from src.core.config import settings
 from src.db.session import engine, init_db
 
@@ -35,6 +36,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(workspace_router)
 app.include_router(api_router)
 app.include_router(crud_router)
 
