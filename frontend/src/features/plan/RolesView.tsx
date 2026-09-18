@@ -1,5 +1,5 @@
-import { Check, ChevronDown } from 'lucide-react'
-import { useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { Check, ChevronDown, RotateCcw } from 'lucide-react'
+import { useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { USE_MOCKS } from '@/api/client'
 import { useEngineers, useTeamDetails } from '@/api/queries'
@@ -9,7 +9,7 @@ import { SearchInput, Select } from '@/components/ui/Field'
 import { Meter } from '@/components/ui/Meter'
 import { ErrorAlert, SkeletonRows } from '@/components/ui/States'
 import { fmt, plural, sprintWeeks } from '@/lib/format'
-import { loadPlacement, projectedSprint } from '@/lib/ganttOverrides'
+import { cardKey, loadPlacement, partKey, persistPlacement } from '@/lib/ganttOverrides'
 import { buildRoleModel, type RoleChip, type RoleLane } from '@/lib/roleModel'
 import { SPRINT_NUMBERS, type PlanModel } from '@/lib/planModel'
 import { useParam } from '@/lib/useParam'
@@ -18,8 +18,20 @@ interface Props {
   model: PlanModel
   planId: string
   fixedSprints: Set<number>
+  readOnly: boolean
   selectedId: string | null
   onSelect: (taskId: string) => void
+}
+
+interface DragState {
+  chip: RoleChip
+  hours: number
+  originX: number
+  originY: number
+  x: number
+  y: number
+  target: number | null
+  valid: boolean
 }
 
 interface HoverCard {
@@ -30,20 +42,25 @@ interface HoverCard {
   y: number
 }
 
-const countLabel = (n: number) => `${n} ${plural(n, 'задача', 'задачи', 'задач')}`
+const chipId = (chip: RoleChip) => `${chip.taskId}:${chip.sprintNo}:${chip.part}`
 
-export function RolesView({ model, planId, fixedSprints, selectedId, onSelect }: Props) {
+export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, onSelect }: Props) {
   const [team, setTeam] = useParam('team')
   const [q, setQ] = useParam('q')
   const engineers = useEngineers({})
 
-  // Раскладка Ганта — единый источник размещений для обоих видов
-  const placement = useMemo(() => (USE_MOCKS ? loadPlacement(planId) : {}), [planId])
-  const roleModel = useMemo(() => buildRoleModel(model, engineers.data ?? [], placement), [model, engineers.data, placement])
-
+  // Раскладка Ганта — единый источник размещений; ручные переносы делаются здесь
+  const [placement, setPlacement] = useState<Record<string, number>>(() => (USE_MOCKS ? loadPlacement(planId) : {}))
+  const [drag, setDrag] = useState<DragState | null>(null)
+  const [feedback, setFeedback] = useState<{ text: string; error?: boolean } | null>(null)
+  const [lastMove, setLastMove] = useState<{ chip: RoleChip; from: number; target: number } | null>(null)
+  const suppressClick = useRef<string | null>(null)
   const [collapsed, setCollapsed] = useState<string[]>([])
   const [openCarriers, setOpenCarriers] = useState<string[]>([])
   const [hover, setHover] = useState<HoverCard | null>(null)
+
+  const roleModel = useMemo(() => buildRoleModel(model, engineers.data ?? [], placement), [model, engineers.data, placement])
+  const changed = Object.keys(placement).length
 
   const query = (q ?? '').trim().toLowerCase()
   const filtered = !!(team || query)
@@ -60,7 +77,7 @@ export function RolesView({ model, planId, fixedSprints, selectedId, onSelect }:
       for (const row of s.rows) {
         const task = model.tasks.get(row.task_id)
         if (!task || row.sprint_no == null) continue
-        const target = projectedSprint(placement, task.task_id, row)
+        const target = placement[cardKey(task.task_id, row)] ?? row.sprint_no
         const bySprint = map.get(task.team_id) ?? new Map<number, { sp: number; count: number }>()
         const cur = bySprint.get(target) ?? { sp: 0, count: 0 }
         bySprint.set(target, {
@@ -80,6 +97,7 @@ export function RolesView({ model, planId, fixedSprints, selectedId, onSelect }:
     .filter((bucket) => bucket.lanes.length > 0 || !filtered)
 
   const showCard = (chip: RoleChip, lane: RoleLane) => (event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (drag) { setHover(null); return }
     const rect = event.currentTarget.getBoundingClientRect()
     setHover({
       chip,
@@ -88,6 +106,88 @@ export function RolesView({ model, planId, fixedSprints, selectedId, onSelect }:
       x: Math.min(rect.left, window.innerWidth - 352),
       y: rect.top - 8,
     })
+  }
+
+  // --- ручная раскладка: drag пер partes весь (все ролевые чипы части вместе) ---
+
+  const canEdit = USE_MOCKS && !readOnly
+
+  const partTarget = (chip: RoleChip) => placement[partKey(chip.taskId, chip.sprintNo)] ?? chip.sprintNo
+
+  /** Целевой спринт валиден: внутри квартала, не зафиксирован фактом, и в нём нет другой части задачи. */
+  const validTarget = (chip: RoleChip, target: number): boolean => {
+    if (!SPRINT_NUMBERS.includes(target) || fixedSprints.has(target)) return false
+    const task = model.tasks.get(chip.taskId)
+    return !task?.rows.some((row) => {
+      if (row.sprint_no === chip.sprintNo) return false
+      const projected = row.sprint_no != null ? (placement[cardKey(task.task_id, row)] ?? row.sprint_no) : null
+      return projected === target
+    })
+  }
+
+  const invalidReason = (chip: RoleChip, target: number | null): string => {
+    if (target == null || !SPRINT_NUMBERS.includes(target)) return 'Вне квартала'
+    if (fixedSprints.has(target)) return 'Спринт закрыт по факту'
+    if (!validTarget(chip, target)) return 'Здесь уже стоит другая часть этой задачи'
+    return 'Перенос недоступен'
+  }
+
+  const pickUp = (chip: RoleChip, hours: number) => (event: ReactPointerEvent<HTMLButtonElement>) => {
+    setHover(null)
+    if (!canEdit || chip.decision === 'done_actual' || (event.pointerType === 'mouse' && event.button !== 0)) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setFeedback(null)
+    setLastMove(null)
+    setDrag({ chip, hours, originX: event.clientX, originY: event.clientY, x: event.clientX, y: event.clientY, target: null, valid: false })
+  }
+
+  const dragMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!drag) return
+    const target = Number(document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-sprint-cell]')?.dataset.sprintCell) || null
+    setDrag({ ...drag, x: event.clientX, y: event.clientY, target, valid: target != null && validTarget(drag.chip, target) })
+  }
+
+  const applyMove = (chip: RoleChip, target: number) => {
+    const next = { ...placement }
+    const key = partKey(chip.taskId, chip.sprintNo)
+    if (target === chip.sprintNo) delete next[key]
+    else next[key] = target
+    setPlacement(next)
+    persistPlacement(planId, next)
+  }
+
+  const drop = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const current = drag
+    if (!current) return
+    setDrag(null)
+    const moved = Math.abs(event.clientX - current.originX) + Math.abs(event.clientY - current.originY) >= 6
+    if (!moved) return
+    const target = current.target
+    if (target == null) return
+    if (!current.valid || !validTarget(current.chip, target)) {
+      setFeedback({ text: `${current.chip.taskId}: ${invalidReason(current.chip, target)}`, error: true })
+      return
+    }
+    const from = partTarget(current.chip)
+    if (target === from) return
+    suppressClick.current = chipId(current.chip)
+    setLastMove({ chip: current.chip, from, target })
+    applyMove(current.chip, target)
+    setFeedback({ text: `${current.chip.taskId} · часть ${current.chip.part} → спринт ${target}` })
+  }
+
+  const revert = () => {
+    if (!lastMove) return
+    applyMove(lastMove.chip, lastMove.from)
+    setFeedback({ text: `${lastMove.chip.taskId} возвращено в спринт ${lastMove.from}` })
+    setLastMove(null)
+  }
+
+  const reset = () => {
+    setPlacement({})
+    persistPlacement(planId, {})
+    setFeedback({ text: 'Раскладка сброшена' })
+    setLastMove(null)
   }
 
   return (
@@ -102,13 +202,18 @@ export function RolesView({ model, planId, fixedSprints, selectedId, onSelect }:
         />
         <div className="toolbar__end">
           {filtered && <Button size="sm" variant="ghost" onClick={() => { setTeam(null); setQ(null) }}>Сбросить фильтры</Button>}
+          {!readOnly && changed > 0 && <Button size="sm" variant="secondary" icon={<RotateCcw />} onClick={reset}>Сбросить переносы · {changed}</Button>}
         </div>
       </div>
 
       <div className="gantt-section-head">
         <div>
-          <h2>Гант по ролям</h2>
-          <span>задачи ролей по спринтам · раскладка синхронна с «Диаграммой Ганта»</span>
+          <h2>Роли по спринтам</h2>
+          <span>задачи ролей и носители · раскладка синхронна с «Диаграммой Ганта»</span>
+        </div>
+        <div className="gantt-feedback" data-error={feedback?.error || undefined}>
+          <span role="status" aria-live="polite">{drag ? 'Отпустите на колонке спринта' : feedback?.text ?? (readOnly ? 'Версия плана только для чтения' : 'Перетащите чип — вся задача переедет в другой спринт')}</span>
+          {lastMove && feedback && !drag && <button type="button" onClick={revert}>Вернуть</button>}
         </div>
       </div>
 
@@ -117,7 +222,7 @@ export function RolesView({ model, planId, fixedSprints, selectedId, onSelect }:
       ) : engineers.error ? (
         <ErrorAlert error={engineers.error} onRetry={() => engineers.refetch()} />
       ) : (
-        <div className="gantt-scroll" role="region" aria-label="Гант по ролям: роли, их носители и задачи по спринтам" tabIndex={0}>
+        <div className="gantt-scroll" role="region" aria-label="Роли по спринтам: носители, загрузка и задачи ролей" tabIndex={0}>
           <div className="gantt">
             <div className="gantt__head">
               <div className="gantt__corner">Команды и роли</div>
@@ -142,7 +247,7 @@ export function RolesView({ model, planId, fixedSprints, selectedId, onSelect }:
                       onClick={() => setCollapsed((before) => before.includes(bucket.teamId) ? before.filter((id) => id !== bucket.teamId) : [...before, bucket.teamId])}
                     >
                       <ChevronDown aria-hidden className="gantt__team-chevron" />
-                      <span className="gantt__team-label"><strong>{bucket.teamId}</strong><small>{countLabel(bucket.lanes.length)}</small></span>
+                      <span className="gantt__team-label"><strong>{bucket.teamId}</strong><small>{bucket.lanes.length} {plural(bucket.lanes.length, 'роль', 'роли', 'ролей')}</small></span>
                     </button>
                     {SPRINT_NUMBERS.map((number) => {
                       const stat = bySprint?.get(number)
@@ -185,17 +290,24 @@ export function RolesView({ model, planId, fixedSprints, selectedId, onSelect }:
                             const cell = lane.cells.get(number)
                             const over = cell && lane.limitHours > 0 && cell.placed > lane.limitHours + 1e-9
                             const chips = cell?.chips.filter((chip) => !query || matchesTask(chip.taskId)) ?? []
+                            const isTarget = drag?.valid && drag.target === number
+                            const isInvalid = drag && !drag.valid && drag.target === number
                             return (
-                              <div className="roles__cell" key={number} data-over={over || undefined}>
+                              <div className="roles__cell" key={number} data-sprint-cell={number} data-over={over || undefined} data-target={isTarget || undefined} data-invalid={isInvalid || undefined}>
                                 {chips.map((chip) => (
                                   <button
-                                    key={`${chip.taskId}:${chip.part}`}
+                                    key={`${chip.taskId}:${chip.sprintNo}:${chip.part}`}
                                     type="button"
                                     className="roles__chip"
                                     data-done={chip.decision === 'done_actual' || undefined}
                                     data-loan={chip.loan || undefined}
-                                    aria-label={`${chip.taskId}, ${lane.role}, ${fmt(chip.hours)} ч${chip.loan ? `, заём из команды ${chip.taskTeamId}` : ''}`}
-                                    onClick={() => onSelect(chip.taskId)}
+                                    data-dragging={drag?.chip.taskId === chip.taskId && drag.chip.sprintNo === chip.sprintNo && drag.chip.part === chip.part || undefined}
+                                    aria-label={`${chip.taskId}, ${lane.role}, ${fmt(chip.hours)} ч${chip.loan ? `, заём из команды ${chip.taskTeamId}` : ''}${!readOnly && chip.decision !== 'done_actual' ? '. Перетащить в другой спринт' : ''}`}
+                                    onPointerDown={pickUp(chip, chip.hours)}
+                                    onPointerMove={dragMove}
+                                    onPointerUp={drop}
+                                    onPointerCancel={() => setDrag(null)}
+                                    onClick={() => { if (suppressClick.current === chipId(chip)) { suppressClick.current = null; return } onSelect(chip.taskId) }}
                                     onMouseEnter={showCard(chip, lane)}
                                     onMouseLeave={() => setHover(null)}
                                   >
@@ -217,17 +329,24 @@ export function RolesView({ model, planId, fixedSprints, selectedId, onSelect }:
                 </section>
               )
             })}
+            <p className="people__note">
+              Часы в ячейке — потребность задач спринта в этой роли; лимит — Σ (80 ч × ставка носителей). Задача без носителей роли
+              в своей команде уходит команде с наибольшим свободным лимитом (пунктир — заём); если носителей роли нет во всей компании,
+              в команде задачи красная метка — «виртуальный держатель». Перетаскивание меняет спринт задачи (часть целиком, вместе с
+              SP и остальными ролями), не носителя роли; раскладка совпадает с «Диаграммой Ганта».
+            </p>
           </div>
         </div>
       )}
 
-      <p className="people__note">
-        Часы в ячейке — потребность задач спринта в этой роли; лимит — Σ (80 ч × ставка носителей). Задача без носителей роли
-        в своей команде уходит команде с наибольшим свободным лимитом (пунктир — заём); если носителей роли нет во всей компании,
-        в команде задачи красная метка — «виртуальный держатель». Спринты совпадают с «Диаграммой Ганта» (включая ручные переносы).
-      </p>
-
-      {hover && createPortal(
+      {drag && createPortal(
+        <div className="roles__ghost" style={{ transform: `translate(${drag.x + 10}px, ${drag.y + 12}px)` }} aria-hidden>
+          <span className="roles__chip-id">{drag.chip.taskId}</span>
+          <small>{fmt(drag.hours)} ч</small>
+        </div>,
+        document.body,
+      )}
+      {hover && !drag && createPortal(
         <div className="people__card" style={{ left: hover.x, top: hover.y, transform: 'translateY(-100%)' }} role="tooltip">
           <div className="people__card-title">{hover.chip.taskId}{hover.chip.parts > 1 ? ` · часть ${hover.chip.part} из ${hover.chip.parts}` : ''}</div>
           {hover.summary && <div className="people__card-row">{hover.summary}</div>}
@@ -236,7 +355,7 @@ export function RolesView({ model, planId, fixedSprints, selectedId, onSelect }:
             {hover.chip.decision === 'done_actual' ? 'Выполнено по факту' : 'Запланировано'}
             {hover.chip.loan && ` · заём из команды ${hover.chip.taskTeamId}`}
           </div>
-          <div className="people__card-hint">Нажмите, чтобы открыть карточку задачи</div>
+          <div className="people__card-hint">Нажмите, чтобы открыть карточку задачи{!readOnly && hover.chip.decision !== 'done_actual' ? '; перетащите — сменить спринт' : ''}</div>
         </div>,
         document.body,
       )}

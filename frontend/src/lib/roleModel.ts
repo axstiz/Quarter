@@ -14,6 +14,8 @@ import { cardKey, type Placement } from './ganttOverrides'
 
 export interface RoleChip {
   taskId: string
+  /** Спринт части по плану (ключ локального переноса) */
+  sprintNo: number
   part: number
   parts: number
   hours: number
@@ -58,6 +60,8 @@ const normRole = (role: string) => role.trim().toLowerCase()
 interface Demand {
   taskTeamId: string
   taskId: string
+  /** Спринт части по плану (кроме done_actual с sprint_no из факта) */
+  rowSprint: number
   part: number
   parts: number
   stepPointsSp: number | null
@@ -134,7 +138,8 @@ export function buildRoleModel(model: PlanModel, engineers: Engineer[], placemen
         const value = hours * share
         if (value >= EPS) {
           demands.push({
-            taskTeamId: task.team_id, taskId: row.task_id, part: row.part, parts: row.parts,
+            taskTeamId: task.team_id, taskId: row.task_id,
+            rowSprint: row.sprint_no ?? sprint, part: row.part, parts: row.parts,
             stepPointsSp: row.step_points_sp, decision: row.decision,
             roleDisplay: role, norm: normRole(role), hours: value,
           })
@@ -150,7 +155,7 @@ export function buildRoleModel(model: PlanModel, engineers: Engineer[], placemen
         const cell = cellOf(lane, sprint)
         cell.placed += demand.hours
         cell.chips.push({
-          taskId: demand.taskId, part: demand.part, parts: demand.parts,
+          taskId: demand.taskId, sprintNo: demand.rowSprint, part: demand.part, parts: demand.parts,
           hours: demand.hours, decision: demand.decision, loan, taskTeamId: demand.taskTeamId,
         })
         cell.chips.sort((a, b) => a.taskId.localeCompare(b.taskId))

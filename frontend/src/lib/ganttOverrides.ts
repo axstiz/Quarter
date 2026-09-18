@@ -6,7 +6,8 @@ import type { PlanRow } from './planModel'
  */
 export type Placement = Record<string, number>
 
-export const cardKey = (taskId: string, row: PlanRow) => `${taskId}:${row.sprint_no}`
+export const partKey = (taskId: string, sprintNo: number) => `${taskId}:${sprintNo}`
+export const cardKey = (taskId: string, row: PlanRow) => partKey(taskId, row.sprint_no!)
 const keyFor = (planId: string) => `quarter-gantt-cards:${planId}`
 
 export function loadPlacement(planId: string): Placement {

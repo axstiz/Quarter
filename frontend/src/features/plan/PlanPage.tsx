@@ -79,7 +79,7 @@ export function PlanPage() {
   const doneCount = summaries.filter((t) => t.decision === 'done_actual').length
   const outsideCount = model?.outside.filter((t) => t.decision !== 'cancelled').length ?? 0
   const spLeft = inPlan.reduce((a, t) => a + t.plannedSp, 0)
-  const current = view ?? 'sprints'
+  const current = view ?? 'roles'
   const panelKey = taskId ? `task:${taskId}` : riskPanel === '1' ? 'risks' : null
 
   const openTask = (id: string) => {
@@ -129,8 +129,8 @@ export function PlanPage() {
             <Tabs
               current={current}
               items={[
+                { value: 'roles', label: 'Роли по спринтам' },
                 { value: 'sprints', label: 'Диаграмма Ганта', count: model?.tasks.size },
-                { value: 'roles', label: 'Гант по ролям' },
                 { value: 'load', label: 'Загрузка команд и ролей' },
                 { value: 'priority', label: 'Приоритеты' },
               ]}
@@ -141,7 +141,9 @@ export function PlanPage() {
             ) : current === 'sprints' ? (
               <GanttView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={fixedSprints} readOnly={readOnly} risks={risks} selectedId={taskId} onSelect={openTask} />
             ) : current === 'roles' ? (
-              <RolesView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={fixedSprints} selectedId={taskId} onSelect={openTask} />
+              <RolesView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={fixedSprints} readOnly={readOnly} selectedId={taskId} onSelect={openTask} />
+            ) : current === 'sprints' ? (
+              <GanttView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={fixedSprints} readOnly={readOnly} risks={risks} selectedId={taskId} onSelect={openTask} />
             ) : current === 'load' ? (
               <LoadView model={model} />
             ) : (
