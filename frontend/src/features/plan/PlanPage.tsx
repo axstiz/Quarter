@@ -15,7 +15,7 @@ import { tasksAtRisk } from './busRisk'
 import { LoadView } from './LoadView'
 import { PriorityView } from './PriorityView'
 import { RiskPanelContent } from './RiskPanel'
-import { SprintsView } from './SprintsView'
+import { GanttView } from './GanttView'
 import { TaskPanelContent } from './TaskPanel'
 import { Panel } from '@/components/ui/Panel'
 
@@ -127,7 +127,7 @@ export function PlanPage() {
             <Tabs
               current={current}
               items={[
-                { value: 'sprints', label: 'По спринтам', count: model?.tasks.size },
+                { value: 'sprints', label: 'Диаграмма Ганта', count: model?.tasks.size },
                 { value: 'load', label: 'Загрузка команд и ролей' },
                 { value: 'priority', label: 'Приоритеты' },
               ]}
@@ -136,7 +136,7 @@ export function PlanPage() {
             {!plan.data || !model || tasks.isLoading ? (
               <SkeletonRows rows={8} cols={6} />
             ) : current === 'sprints' ? (
-              <SprintsView model={model} fixedSprints={new Set(facts.data?.map((f) => f.sprint_no))} risks={risks} selectedId={taskId} onSelect={openTask} />
+              <GanttView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={new Set(facts.data?.map((f) => f.sprint_no))} readOnly={readOnly} risks={risks} selectedId={taskId} onSelect={openTask} />
             ) : current === 'load' ? (
               <LoadView model={model} />
             ) : (
