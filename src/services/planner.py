@@ -278,15 +278,3 @@ def generate_plan(data: PlannerInput, first_free_sprint: int = 1) -> Plan:
         plan.decisions.append(Explanation(task_id=task_id, decision=PlanDecision.postponed, reason=reason))
 
     return plan
-
-
-def _role_available_any_sprint(task: Task, eng_limits: dict[str, float],
-                               eng_roles: dict[str, set[str]]) -> bool:
-    for role, hours in task.role_hours.items():
-        rl = _rl(role)
-        holders = [e for e, roles in eng_roles.items() if rl in roles]
-        if not holders:
-            return False
-        if sum(eng_limits.get(eid, 0.0) for eid in holders) < hours:
-            return False
-    return True

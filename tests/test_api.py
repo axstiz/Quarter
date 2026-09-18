@@ -15,18 +15,20 @@ def anyio_backend():
 
 @pytest_asyncio.fixture()
 async def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("POSTCODE_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 't.db'}")
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from src.core.config import settings
+    from src.db.session import init_db
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     import src.db.session as session_mod
+
+    # патчим singleton напрямую: setenv не работает — settings создан при первом импорте;
+    # изоляция по-тестовая СВОЯ tmp-БД (раньше маскировалась destructive reset'ом)
+    dsn = f"sqlite+aiosqlite:///{tmp_path / 't.db'}"
+    monkeypatch.setattr(settings, "database_url", dsn)
+    settings.dataset_dir = ROOT / "dataset"
 
     # каждый тест получает свой engine под свой tmp-DSN
     session_mod.engine = create_async_engine(settings.database_url, echo=False)
     session_mod.SessionLocal = async_sessionmaker(session_mod.engine, expire_on_commit=False)
-    from src.db.session import init_db
-    from src.core.config import settings
-
-    settings.dataset_dir = ROOT / "dataset"
     await init_db()
     from src.main import app
 
@@ -143,6 +145,101 @@ async def test_plans_versions_and_facts(client, sample_xlsx):
     r = await client.get(f"/api/v1/plans/{new_pid}")
     assert r.status_code == 200
     assert r.json()["parent_plan_id"] == pid
+
+
+@pytest.mark.asyncio
+async def test_reimport_preserves_plans(client):
+    """Фикс reset_dataset_tables: повторный импорт не затирает планы и факты."""
+    r = await client.post("/api/v1/data/import")
+    assert r.status_code == 200
+    r = await client.post("/api/v1/plans/generate")
+    assert r.status_code == 201
+    plan_id = r.json()["plan_id"]
+    r = await client.post(f"/api/v1/plans/{plan_id}/sprints/1/facts",
+                          json={"completed_sp": 5.0, "completed_task_ids": []})
+    assert r.status_code == 200
+
+    r = await client.post("/api/v1/data/import")
+    assert r.status_code == 200
+    counts = r.json()["counts"]
+    assert counts["tasks"] == 45
+
+    r = await client.get("/api/v1/plans")
+    plans = r.json()
+    assert len(plans) >= 2
+    r = await client.get(f"/api/v1/plans/{plan_id}")
+    assert r.status_code == 200 and r.json()["plan_id"] == plan_id
+    r = await client.get(f"/api/v1/plans/{plan_id}/facts")
+    facts = r.json()
+    assert any(f["sprint_no"] == 1 and f["completed_sp"] == 5.0 for f in facts)
+
+
+@pytest.mark.asyncio
+async def test_manual_records_survive_reimport(client):
+    """Спека data: повторный импорт не затирает source=manual (fix-manual-records-survive-reimport)."""
+    r = await client.post("/api/v1/data/import")
+    assert r.status_code == 200
+
+    r = await client.post("/api/v1/engineers", json={
+        "engineer_id": "ENG-MANUAL", "team_id": "Team-L", "role": "Ручная роль",
+    })
+    assert r.status_code == 201
+    r = await client.post("/api/v1/tasks",
+                          json={"task_id": "MAN-1", "team_id": "Team-L", "summary": "Ручная задача"})
+    assert r.status_code == 201
+
+    # повторный импорт — ручные записи выживают, импортные перезагружаются
+    r = await client.post("/api/v1/data/import")
+    assert r.status_code == 200
+    assert r.json()["counts"]["tasks"] == 45
+
+    r = await client.get("/api/v1/engineers/ENG-MANUAL")
+    assert r.status_code == 200
+    r = await client.get("/api/v1/tasks/MAN-1")
+    assert r.status_code == 200 and r.json()["summary"] == "Ручная задача"
+    r = await client.get("/api/v1/tasks", params={"team_id": "Team-L"})
+    ids = {t["task_id"] for t in r.json()}
+    assert "MAN-1" in ids
+    # импортная задача тоже на месте (перезагружена, не manual)
+    r = await client.get("/api/v1/tasks/ONK-2475")
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_crud_teams_dependencies_full(client):
+    """fix-crud-teams-dependencies: PUT/DELETE для teams и dependencies (по паре)."""
+    await client.post("/api/v1/data/import")
+
+    r = await client.post("/api/v1/teams", json={"team_id": "Team-NEW", "name": "Новая"})
+    assert r.status_code == 201
+    r = await client.put("/api/v1/teams/Team-NEW", json={"name": "Переименованная"})
+    assert r.status_code == 200 and r.json()["source"] == "manual"
+    r = await client.put("/api/v1/teams/NOPE-404", json={"name": "X"})
+    assert r.status_code == 404
+    r = await client.put("/api/v1/teams/Team-NEW", json={"name": ""})
+    assert r.status_code == 422
+
+    pair = {"blocking_task_id": "MP-101", "blocked_task_id": "MP-102"}
+    r = await client.get("/api/v1/dependencies")
+    assert any(d["blocking_task_id"] == "MP-101" and d["blocked_task_id"] == "MP-102"
+               for d in r.json())
+
+    r = await client.put("/api/v1/dependencies",
+                         params=dict(blocking_task_id="MP-101", blocked_task_id="MP-102"),
+                         json={"dependency_type": "depends on"})
+    assert r.status_code == 200 and r.json()["dependency_type"] == "depends on"
+    r = await client.put("/api/v1/dependencies",
+                         params={"blocking_task_id": "NOPE", "blocked_task_id": "NOPE"},
+                         json={"dependency_type": "x"})
+    assert r.status_code == 404
+
+    r = await client.delete("/api/v1/dependencies", params=pair)
+    assert r.status_code == 200
+    r = await client.get("/api/v1/dependencies")
+    assert not any(d["blocking_task_id"] == "MP-101" and d["blocked_task_id"] == "MP-102"
+                   for d in r.json())
+    r = await client.delete("/api/v1/dependencies", params=pair)
+    assert r.status_code == 404
 
 
 @pytest.fixture()

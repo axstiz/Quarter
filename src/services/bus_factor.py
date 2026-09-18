@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.domain.models import BusFactorItem, BusFactorReport, Engineer
+from src.domain.models import BusFactorItem, BusFactorReport, Engineer, Task
 
 METHODOLOGY = (
     "Bus Factor = число носителей компетенции (роли или заявленного навыка) в области расчёта "
@@ -69,3 +69,40 @@ def compute_bus_factor(engineers: list[Engineer]) -> BusFactorReport:
 def unique_competencies(engineers: list[Engineer]) -> list[BusFactorItem]:
     report = compute_bus_factor(engineers)
     return [i for i in report.items if i.factor == 1]
+
+
+def plan_bus_risk(
+    planned_items: list[dict],
+    tasks: dict[str, Task],
+    engineers: list[Engineer],
+) -> dict:
+    """Задачи запланированного плана, зависящие от ролей с factor ≤ 1
+    (change 004-frontend-readiness). Область расчёта — компания; роль без
+    носителей = «виртуальный держатель», тоже риск (holders = []). Роли
+    сопоставляются нормализованно (lower, как в compute_bus_factor).
+    Навыки (skills_declared) не сопоставляются: в данных нет связи
+    задача-навык, только задача-роль."""
+    role_holders: dict[str, set[str]] = {}
+    for e in engineers:
+        role_holders.setdefault(e.role.lower(), set()).add(e.engineer_id)
+    results = []
+    for item in planned_items:
+        task = tasks.get(item["task_id"])
+        if not task:
+            continue
+        at_risk: list[str] = []
+        holders: dict[str, list[str]] = {}
+        for role in (task.role_hours or {}):
+            holders_for_role = sorted(role_holders.get(str(role).lower(), set()))
+            if len(holders_for_role) <= 1:
+                at_risk.append(role)
+                holders[role] = holders_for_role
+        if at_risk:
+            results.append({
+                "task_id": task.task_id,
+                "summary": task.summary,
+                "sprint_no": item.get("sprint_no"),
+                "at_risk_keys": at_risk,
+                "holders": holders,
+            })
+    return {"total_at_risk": len(results), "tasks": results}

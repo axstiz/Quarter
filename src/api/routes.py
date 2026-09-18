@@ -24,6 +24,7 @@ from src.db.models import (
     TaskORM,
     TeamHistoryORM,
 )
+from src.api.workspaces import get_current_workspace_id
 from src.db.session import get_session
 from src.domain.models import (
     SPRINTS_PER_QUARTER,
@@ -49,12 +50,14 @@ from src.services.replanner import (
 router = APIRouter(prefix="/api/v1")
 
 
-async def load_world(session) -> tuple[dict[str, Task], list, list, dict]:
-    rows = (await session.execute(select(TaskORM))).scalars().all()
-    role_reqs = (await session.execute(select(RoleRequirementORM) .where(RoleRequirementORM.hours > 0))).scalars().all()
-    deps_rows = (await session.execute(select(DependencyORM))).scalars().all()
-    eng_rows = (await session.execute(select(EngineerORM))).scalars().all()
-    hist_rows = (await session.execute(select(TeamHistoryORM))).scalars().all()
+async def load_world(session, workspace_id: str = "default") -> tuple[dict[str, Task], list, list, dict]:
+    rows = (await session.execute(select(TaskORM).where(TaskORM.workspace_id == workspace_id))).scalars().all()
+    role_reqs = (await session.execute(select(RoleRequirementORM).where(
+        RoleRequirementORM.workspace_id == workspace_id, RoleRequirementORM.hours > 0
+    ))).scalars().all()
+    deps_rows = (await session.execute(select(DependencyORM).where(DependencyORM.workspace_id == workspace_id))).scalars().all()
+    eng_rows = (await session.execute(select(EngineerORM).where(EngineerORM.workspace_id == workspace_id))).scalars().all()
+    hist_rows = (await session.execute(select(TeamHistoryORM).where(TeamHistoryORM.workspace_id == workspace_id))).scalars().all()
 
     tasks: dict[str, Task] = {}
     for r in rows:
@@ -125,12 +128,15 @@ async def get_plan_items(session, plan_id: str) -> list[PlanItemORM]:
 
 
 @router.post("/plans/generate", status_code=201)
-async def generate_plan_endpoint(session: AsyncSession = Depends(get_session)) -> dict:
-    tasks, engineers, history, deps = await load_world(session)
+async def generate_plan_endpoint(
+    session: AsyncSession = Depends(get_session),
+    workspace_id: str = Depends(get_current_workspace_id),
+) -> dict:
+    tasks, engineers, history, deps = await load_world(session, workspace_id=workspace_id)
     if not tasks:
         raise HTTPException(status_code=400, detail="нет данных в базе; сначала POST /api/v1/data/import")
     plan = generate_plan(PlannerInput(list(tasks.values()), engineers, history, deps))
-    plan_orm = PlanORM(is_initial=True)
+    plan_orm = PlanORM(workspace_id=workspace_id, is_initial=True)
     session.add(plan_orm)
     await session.flush()
     for sprint in plan.sprints:
@@ -193,11 +199,14 @@ async def get_plan(plan_id: str, session: AsyncSession = Depends(get_session)) -
 
 
 @router.post("/data/import")
-async def data_import(session: AsyncSession = Depends(get_session)) -> dict:
+async def data_import(
+    session: AsyncSession = Depends(get_session),
+    workspace_id: str = Depends(get_current_workspace_id),
+) -> dict:
     from src.core.config import settings
 
-    await reset_dataset_tables(session)
-    counts = await import_dataset(session, settings.dataset_dir)
+    await reset_dataset_tables(session, workspace_id=workspace_id)
+    counts = await import_dataset(session, settings.dataset_dir, workspace_id=workspace_id)
     return {"status": "imported", "counts": counts}
 
 
@@ -208,43 +217,45 @@ JOBS_TMP_DIR.mkdir(exist_ok=True)
 
 
 @router.post("/data/upload", status_code=201)
-async def data_upload(file: UploadFile = File(...)) -> dict:
+async def data_upload(file: UploadFile = File(...), session: AsyncSession = Depends(get_session)) -> dict:
     """Загрузка файла xlsx/csv/json в пайплайн normalization."""
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in (".xlsx", ".csv", ".json"):
         raise HTTPException(status_code=422, detail=f"поддерживаются xlsx/csv/json, получен {suffix}")
     dest = JOBS_TMP_DIR / f"{uuid.uuid4().hex}{suffix}"
     dest.write_bytes(await file.read())
-    from src.ai.pipelines.normalization import new_job, UploadJob
+    from src.ai.pipelines.normalization import new_job, save_job_db
 
     try:
         job = new_job(file.filename or dest.name, dest)
+        await save_job_db(session, job)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"не удалось разобрать файл: {e}")
     return job.snapshot()
 
 
 @router.get("/data/jobs/{job_id}")
-async def job_status(job_id: str) -> dict:
-    from src.ai.pipelines.normalization import UploadJob
+async def job_status(job_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+    from src.ai.pipelines.normalization import get_job_db
 
-    job = UploadJob.JOBS.get(job_id)
+    job = await get_job_db(session, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job не найден")
     return job.snapshot()
 
 
 @router.post("/data/jobs/{job_id}/answers")
-async def job_answers(job_id: str, body: dict) -> dict:
+async def job_answers(job_id: str, body: dict, session: AsyncSession = Depends(get_session)) -> dict:
     """Ответы на вопросы маппинга: {колонка: "entity.field" | "пропустить"}"""
-    from src.ai.pipelines.normalization import UploadJob, run_stage
+    from src.ai.pipelines.normalization import get_job_db, run_stage, save_job_db
 
-    job = UploadJob.JOBS.get(job_id)
+    job = await get_job_db(session, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job не найден")
     answers = body.get("answers", {})
     try:
         run_stage(job, answers)
+        await save_job_db(session, job)
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e))
     return job.snapshot()
@@ -253,10 +264,10 @@ async def job_answers(job_id: str, body: dict) -> dict:
 @router.post("/data/jobs/{job_id}/confirm")
 async def job_confirm(job_id: str, session: AsyncSession = Depends(get_session)) -> dict:
     """Импорт в БД с merge-правилами (manual не затирается)."""
-    from src.ai.pipelines.normalization import UploadJob
+    from src.ai.pipelines.normalization import get_job_db, save_job_db
     from src.db.staging import stage_import
 
-    job = UploadJob.JOBS.get(job_id)
+    job = await get_job_db(session, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job не найден")
     if job.status != "ready":
@@ -267,18 +278,20 @@ async def job_confirm(job_id: str, session: AsyncSession = Depends(get_session))
         await session.rollback()
         raise HTTPException(status_code=422, detail=f"ошибка импорта: {e}")
     job.status = "confirmed"
+    await save_job_db(session, job)
     return {"status": "confirmed", "counts": counts}
 
 
 @router.post("/ai/normalize/{job_id}")
-async def ai_rerun(job_id: str) -> dict:
+async def ai_rerun(job_id: str, session: AsyncSession = Depends(get_session)) -> dict:
     """Повторный прогон пайплайна (после ответов или без них)."""
-    from src.ai.pipelines.normalization import UploadJob, run_stage
+    from src.ai.pipelines.normalization import get_job_db, run_stage, save_job_db
 
-    job = UploadJob.JOBS.get(job_id)
+    job = await get_job_db(session, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job не найден")
     run_stage(job)
+    await save_job_db(session, job)
     return job.snapshot()
 
 
@@ -530,6 +543,19 @@ async def task_explanation(plan_id: str, task_id: str, session: AsyncSession = D
     }
 
 
+@router.get("/plans/{plan_id}/bus-risk")
+async def plan_bus_risk_endpoint(plan_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+    plan_orm = await get_plan_orm(session, plan_id)
+    if not plan_orm:
+        raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
+    items = await get_plan_items(session, plan_id)
+    planned = [{"task_id": i.task_id, "sprint_no": i.sprint_no} for i in items
+               if i.decision == PlanDecision.planned.value]
+    tasks, engineers, history, deps = await load_world(session)
+    from src.services.bus_factor import plan_bus_risk
+    return plan_bus_risk(planned, tasks, engineers)
+
+
 @router.get("/bus-factor")
 async def bus_factor(session: AsyncSession = Depends(get_session)) -> dict:
     tasks, engineers, history, deps = await load_world(session)
@@ -601,8 +627,9 @@ async def facts_list(plan_id: str, session: AsyncSession = Depends(get_session))
 @router.get("/tasks")
 async def tasks_list(team_id: str | None = None, status: str | None = None,
                      search: str | None = None,
-                     session: AsyncSession = Depends(get_session)) -> list[dict]:
-    tasks, engineers, history, deps = await load_world(session)
+                     session: AsyncSession = Depends(get_session),
+                     workspace_id: str = Depends(get_current_workspace_id)) -> list[dict]:
+    tasks, engineers, history, deps = await load_world(session, workspace_id=workspace_id)
     dep_map: dict[str, list[dict]] = defaultdict(list)
     for blocking, blocked in deps:
         dep_map[blocked].append({"blocking_task_id": blocking})

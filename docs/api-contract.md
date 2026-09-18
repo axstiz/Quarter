@@ -15,6 +15,10 @@ uv run uvicorn src.main:app --reload
 
 Правила: не менять `dataset/*.csv` руками (правки только через xlsx/скрипт); auth секции пока нет (change 005) — все ручки открыты; все ответы JSON, коды 200/201/400/404/409/422.
 
+## CORS (change 004-frontend-readiness)
+
+Включён `CORSMiddleware`: dev-сервер фронта (Vite/webpack, любой origin) по умолчанию разрешён (`allow_origins=["*"]`, `allow_credentials=False`). Для прод-ограничения — env `CORS_ORIGINS` (список через запятую, например `CORS_ORIGINS=https://planner.example.com` или `POSTCODE_CORS_ORIGINS=...`). Preflight (`OPTIONS`) работает автоматически.
+
 ---
 
 ## Стр. 0.1 «Загрузка данных»
@@ -52,6 +56,17 @@ uv run uvicorn src.main:app --reload
 | Зависимости | `GET /dependencies` | — | 15 пар (blocking/blocked) |
 | Приоритет (human) | `PUT /tasks/{task_id}/priority` | `{"priority": 1}` | порядок задач (меньше — раньше); после пересчёта применяется |
 | Отмена (двухшаговая) | `POST /plans/{id}/tasks/{tid}/cancel-request` → `.../confirm-cancel` | | postponed → cancelled_pending → cancelled |
+| Bus-риск виджета | `GET /plans/{id}/bus-risk` | — | задачи плана с ролями factor ≤ 1 (одиночный/нулевой носитель) |
+
+Пример `GET /plans/{id}/bus-risk` → 200 (change 004):
+```json
+{"total_at_risk": 9,
+ "tasks":[{"task_id":"ONK-2475","summary":"Консолидация данных","sprint_no":1,
+           "at_risk_keys":["Руководитель проекта"],"holders":{"Руководитель проекта":[]}},
+          {"task_id":"AI-301","summary":"…","sprint_no":1,
+           "at_risk_keys":["Руководитель BigData"],"holders":{"Руководитель BigData":["ENG-426"]}}]}
+```
+`holders` = [] — роль без носителей (планируется виртуальным держателем); `[engineer_id]` — единственный носитель. Виджет дашборда берёт данные из этой одной ручки.
 
 Пример объекта задачи в `GET /plans/{id}`:
 ```json
