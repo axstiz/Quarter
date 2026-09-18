@@ -1,25 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.context import Context, require_context, require_permission_ws
 from src.db.models import MembershipORM, UserORM, WorkspaceORM
 from src.db.session import get_session
 
 workspace_router = APIRouter(prefix="/workspaces", tags=["workspaces"])
-
-
-async def get_current_user_optional(
-    authorization: str | None = Header(None),
-    session: AsyncSession = Depends(get_session),
-) -> UserORM | None:
-    try:
-        from src.api.auth import get_current_user_optional as auth_get_user
-        return await auth_get_user(authorization, session)
-    except Exception:
-        return None
 
 
 class CreateWorkspaceRequest(BaseModel):
@@ -31,32 +21,21 @@ class AddMemberRequest(BaseModel):
     role: str = "editor"
 
 
-async def get_current_workspace_id(
-    x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
-) -> str:
-    return x_workspace_id.strip() if x_workspace_id and x_workspace_id.strip() else "default"
-
-
 @workspace_router.get("")
-async def list_workspaces(
-    user: UserORM | None = Depends(get_current_user_optional),
-    session: AsyncSession = Depends(get_session),
-) -> list[dict]:
-    if not user:
-        default_ws = (await session.execute(select(WorkspaceORM).where(WorkspaceORM.id == "default"))).scalar_one_or_none()
-        if not default_ws:
-            default_ws = WorkspaceORM(id="default", name="Default Workspace")
-            session.add(default_ws)
-            await session.commit()
-        return [{"id": default_ws.id, "name": default_ws.name, "role": "admin"}]
+async def list_workspaces(ctx: Context = Depends(require_context)) -> list[dict]:
+    default_ws = (await ctx.session.execute(select(WorkspaceORM).where(WorkspaceORM.id == "default"))).scalar_one_or_none()
+    if not default_ws:
+        default_ws = WorkspaceORM(id="default", name="Default Workspace")
+        ctx.session.add(default_ws)
+        await ctx.session.commit()
 
-    memberships = (await session.execute(select(MembershipORM).where(MembershipORM.user_id == user.id))).scalars().all()
+    memberships = (await ctx.session.execute(select(MembershipORM).where(MembershipORM.user_id == ctx.user.id))).scalars().all()
     ws_ids = {m.workspace_id for m in memberships}
     ws_ids.add("default")
 
-    workspaces = (await session.execute(select(WorkspaceORM).where(WorkspaceORM.id.in_(ws_ids)))).scalars().all()
+    workspaces = (await ctx.session.execute(select(WorkspaceORM).where(WorkspaceORM.id.in_(ws_ids)))).scalars().all()
     mem_map = {m.workspace_id: m.role for m in memberships}
-    mem_map.setdefault("default", user.role)
+    mem_map.setdefault("default", ctx.user.role)
 
     out = []
     for ws in workspaces:
@@ -72,59 +51,57 @@ async def list_workspaces(
 @workspace_router.post("", status_code=201)
 async def create_workspace(
     body: CreateWorkspaceRequest,
-    user: UserORM | None = Depends(get_current_user_optional),
-    session: AsyncSession = Depends(get_session),
+    ctx: Context = Depends(require_context),
 ) -> dict:
-    user_id = user.id if user else "system"
-    ws = WorkspaceORM(name=body.name, created_by=user_id)
-    session.add(ws)
-    await session.flush()
-
-    if user:
-        session.add(MembershipORM(workspace_id=ws.id, user_id=user.id, role="admin"))
-
-    await session.commit()
-    return {"id": ws.id, "name": ws.name, "created_by": user_id}
+    ws = WorkspaceORM(name=body.name, created_by=ctx.user.id)
+    ctx.session.add(ws)
+    await ctx.session.flush()
+    ctx.session.add(MembershipORM(workspace_id=ws.id, user_id=ctx.user.id, role="admin"))
+    await ctx.session.commit()
+    return {"id": ws.id, "name": ws.name, "created_by": ctx.user.id}
 
 
 @workspace_router.put("/{workspace_id}")
 async def update_workspace(
     workspace_id: str,
     body: CreateWorkspaceRequest,
-    session: AsyncSession = Depends(get_session),
+    ctx: Context = Depends(require_permission_ws("workspace_admin")),
 ) -> dict:
-    ws = (await session.execute(select(WorkspaceORM).where(WorkspaceORM.id == workspace_id))).scalar_one_or_none()
+    ws = (await ctx.session.execute(select(WorkspaceORM).where(WorkspaceORM.id == workspace_id))).scalar_one_or_none()
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace не найден")
 
     ws.name = body.name
-    await session.commit()
+    await ctx.session.commit()
     return {"id": ws.id, "name": ws.name}
 
 
 @workspace_router.delete("/{workspace_id}")
 async def delete_workspace(
     workspace_id: str,
-    session: AsyncSession = Depends(get_session),
+    confirm: bool = False,
+    ctx: Context = Depends(require_permission_ws("workspace_admin")),
 ) -> dict:
     if workspace_id == "default":
         raise HTTPException(status_code=400, detail="Нельзя удалить default workspace")
+    if not confirm:
+        raise HTTPException(status_code=409, detail="Подтвердите удаление (?confirm=true)")
 
-    ws = (await session.execute(select(WorkspaceORM).where(WorkspaceORM.id == workspace_id))).scalar_one_or_none()
+    ws = (await ctx.session.execute(select(WorkspaceORM).where(WorkspaceORM.id == workspace_id))).scalar_one_or_none()
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace не найден")
 
-    await session.delete(ws)
-    await session.commit()
+    await ctx.session.delete(ws)
+    await ctx.session.commit()
     return {"status": "deleted", "id": workspace_id}
 
 
 @workspace_router.get("/{workspace_id}/members")
 async def list_members(
     workspace_id: str,
-    session: AsyncSession = Depends(get_session),
+    ctx: Context = Depends(require_context),
 ) -> list[dict]:
-    memberships = (await session.execute(select(MembershipORM).where(MembershipORM.workspace_id == workspace_id))).scalars().all()
+    memberships = (await ctx.session.execute(select(MembershipORM).where(MembershipORM.workspace_id == workspace_id))).scalars().all()
     return [{"user_id": m.user_id, "role": m.role} for m in memberships]
 
 
@@ -132,12 +109,12 @@ async def list_members(
 async def add_member(
     workspace_id: str,
     body: AddMemberRequest,
-    session: AsyncSession = Depends(get_session),
+    ctx: Context = Depends(require_permission_ws("members_admin")),
 ) -> dict:
     role = body.role if body.role in ("admin", "editor", "reader") else "editor"
     m = MembershipORM(workspace_id=workspace_id, user_id=body.user_id, role=role)
-    session.add(m)
-    await session.commit()
+    ctx.session.add(m)
+    await ctx.session.commit()
     return {"workspace_id": workspace_id, "user_id": body.user_id, "role": role}
 
 
@@ -145,14 +122,14 @@ async def add_member(
 async def remove_member(
     workspace_id: str,
     user_id: str,
-    session: AsyncSession = Depends(get_session),
+    ctx: Context = Depends(require_permission_ws("members_admin")),
 ) -> dict:
-    m = (await session.execute(select(MembershipORM).where(
+    m = (await ctx.session.execute(select(MembershipORM).where(
         MembershipORM.workspace_id == workspace_id,
         MembershipORM.user_id == user_id,
     ))).scalar_one_or_none()
     if not m:
         raise HTTPException(status_code=404, detail="Участник не найден")
-    await session.delete(m)
-    await session.commit()
+    await ctx.session.delete(m)
+    await ctx.session.commit()
     return {"status": "removed", "user_id": user_id}

@@ -24,7 +24,8 @@ from src.db.models import (
     TaskORM,
     TeamHistoryORM,
 )
-from src.api.workspaces import get_current_workspace_id
+from src.api.context import Context, require_context
+from src.api.permissions import require_permission
 from src.db.session import get_session
 from src.domain.models import (
     SPRINTS_PER_QUARTER,
@@ -68,7 +69,7 @@ async def load_world(session, workspace_id: str = "default") -> tuple[dict[str, 
             summary=r.summary,
             status=r.status,
             priority=float(r.priority),
-            spent_time=0.0,
+            spent_time=float(r.spent_time or 0.0),
             estimation_sp=r.estimation_sp,
             estimated_hh=r.estimated_hh,
             role_hours={},
@@ -118,8 +119,11 @@ def _plan_from_orm(plan_id: str, items: list[PlanItemORM]) -> Plan:
     return plan
 
 
-async def get_plan_orm(session, plan_id: str) -> PlanORM | None:
-    return (await session.execute(select(PlanORM).where(PlanORM.plan_id == plan_id))).scalar_one_or_none()
+async def get_plan_orm(session, plan_id: str, workspace_id: str | None = None) -> PlanORM | None:
+    q = select(PlanORM).where(PlanORM.plan_id == plan_id)
+    if workspace_id is not None:
+        q = q.where(PlanORM.workspace_id == workspace_id)
+    return (await session.execute(q)).scalar_one_or_none()
 
 
 async def get_plan_items(session, plan_id: str) -> list[PlanItemORM]:
@@ -129,19 +133,19 @@ async def get_plan_items(session, plan_id: str) -> list[PlanItemORM]:
 
 @router.post("/plans/generate", status_code=201)
 async def generate_plan_endpoint(
-    session: AsyncSession = Depends(get_session),
-    workspace_id: str = Depends(get_current_workspace_id),
+    ctx: Context = Depends(require_permission("plans_generate")),
 ) -> dict:
-    tasks, engineers, history, deps = await load_world(session, workspace_id=workspace_id)
+    workspace_id = ctx.workspace_id
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=workspace_id)
     if not tasks:
         raise HTTPException(status_code=400, detail="нет данных в базе; сначала POST /api/v1/data/import")
     plan = generate_plan(PlannerInput(list(tasks.values()), engineers, history, deps))
     plan_orm = PlanORM(workspace_id=workspace_id, is_initial=True)
-    session.add(plan_orm)
-    await session.flush()
+    ctx.session.add(plan_orm)
+    await ctx.session.flush()
     for sprint in plan.sprints:
         for item in sprint.items:
-            session.add(PlanItemORM(
+            ctx.session.add(PlanItemORM(
                 plan_id=plan_orm.plan_id,
                 task_id=item.task_id,
                 team_id=tasks[item.task_id].team_id if item.task_id in tasks else "",
@@ -151,7 +155,7 @@ async def generate_plan_endpoint(
                 planned_sp=item.step_points_sp,
             ))
     for d in plan.decisions:
-        session.add(PlanItemORM(
+        ctx.session.add(PlanItemORM(
             plan_id=plan_orm.plan_id,
             task_id=d.task_id,
             team_id=tasks[d.task_id].team_id if d.task_id in tasks else "",
@@ -159,19 +163,19 @@ async def generate_plan_endpoint(
             sprint_no=None,
             reason=d.reason,
         ))
-    await session.commit()
+    await ctx.session.commit()
     return {"plan_id": plan_orm.plan_id, "sprints": {str(s.sprint_no): [i.task_id for i in sorted(
         s.items, key=lambda x: x.task_id)] for s in plan.sprints}}
 
 
 @router.get("/plans/{plan_id}")
-async def get_plan(plan_id: str, session: AsyncSession = Depends(get_session)) -> dict:
-    plan_orm = await get_plan_orm(session, plan_id)
+async def get_plan(plan_id: str, ctx: Context = Depends(require_context)) -> dict:
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
     if not plan_orm:
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
-    items = await get_plan_items(session, plan_id)
+    items = await get_plan_items(ctx.session, plan_id)
     plan = _plan_from_orm(plan_id, items)
-    tasks, engineers, history, deps = await load_world(session)
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     def _with_task(i) -> dict:
         task = tasks.get(i.task_id)
         base = i.model_dump()
@@ -199,14 +203,12 @@ async def get_plan(plan_id: str, session: AsyncSession = Depends(get_session)) -
 
 
 @router.post("/data/import")
-async def data_import(
-    session: AsyncSession = Depends(get_session),
-    workspace_id: str = Depends(get_current_workspace_id),
-) -> dict:
+async def data_import(ctx: Context = Depends(require_permission("import_data"))) -> dict:
     from src.core.config import settings
 
-    await reset_dataset_tables(session, workspace_id=workspace_id)
-    counts = await import_dataset(session, settings.dataset_dir, workspace_id=workspace_id)
+    workspace_id = ctx.workspace_id
+    await reset_dataset_tables(ctx.session, workspace_id=workspace_id)
+    counts = await import_dataset(ctx.session, settings.dataset_dir, workspace_id=workspace_id)
     return {"status": "imported", "counts": counts}
 
 
@@ -217,7 +219,7 @@ JOBS_TMP_DIR.mkdir(exist_ok=True)
 
 
 @router.post("/data/upload", status_code=201)
-async def data_upload(file: UploadFile = File(...), session: AsyncSession = Depends(get_session)) -> dict:
+async def data_upload(file: UploadFile = File(...), ctx: Context = Depends(require_permission("import_data"))) -> dict:
     """Загрузка файла xlsx/csv/json в пайплайн normalization."""
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in (".xlsx", ".csv", ".json"):
@@ -228,107 +230,121 @@ async def data_upload(file: UploadFile = File(...), session: AsyncSession = Depe
 
     try:
         job = new_job(file.filename or dest.name, dest)
-        await save_job_db(session, job)
+        job.workspace_id = ctx.workspace_id
+        await save_job_db(ctx.session, job)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"не удалось разобрать файл: {e}")
     return job.snapshot()
 
 
 @router.get("/data/jobs/{job_id}")
-async def job_status(job_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+async def job_status(job_id: str, ctx: Context = Depends(require_context)) -> dict:
     from src.ai.pipelines.normalization import get_job_db
 
-    job = await get_job_db(session, job_id)
+    job = await get_job_db(ctx.session, job_id)
     if not job:
+        raise HTTPException(status_code=404, detail="job не найден")
+    if job.workspace_id != ctx.workspace_id:
         raise HTTPException(status_code=404, detail="job не найден")
     return job.snapshot()
 
 
 @router.post("/data/jobs/{job_id}/answers")
-async def job_answers(job_id: str, body: dict, session: AsyncSession = Depends(get_session)) -> dict:
+async def job_answers(job_id: str, body: dict, ctx: Context = Depends(require_permission("import_data"))) -> dict:
     """Ответы на вопросы маппинга: {колонка: "entity.field" | "пропустить"}"""
     from src.ai.pipelines.normalization import get_job_db, run_stage, save_job_db
 
-    job = await get_job_db(session, job_id)
+    job = await get_job_db(ctx.session, job_id)
     if not job:
+        raise HTTPException(status_code=404, detail="job не найден")
+    if job.workspace_id != ctx.workspace_id:
         raise HTTPException(status_code=404, detail="job не найден")
     answers = body.get("answers", {})
     try:
         run_stage(job, answers)
-        await save_job_db(session, job)
+        await save_job_db(ctx.session, job)
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e))
     return job.snapshot()
 
 
 @router.post("/data/jobs/{job_id}/confirm")
-async def job_confirm(job_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+async def job_confirm(job_id: str, ctx: Context = Depends(require_permission("import_data"))) -> dict:
     """Импорт в БД с merge-правилами (manual не затирается)."""
     from src.ai.pipelines.normalization import get_job_db, save_job_db
     from src.db.staging import stage_import
 
-    job = await get_job_db(session, job_id)
+    job = await get_job_db(ctx.session, job_id)
     if not job:
+        raise HTTPException(status_code=404, detail="job не найден")
+    if job.workspace_id != ctx.workspace_id:
         raise HTTPException(status_code=404, detail="job не найден")
     if job.status != "ready":
         raise HTTPException(status_code=409, detail=f"job не готов ({job.status})")
     try:
-        counts = await stage_import(session, job)
+        counts = await stage_import(ctx.session, job, workspace_id=ctx.workspace_id)
     except Exception as e:
-        await session.rollback()
+        await ctx.session.rollback()
         raise HTTPException(status_code=422, detail=f"ошибка импорта: {e}")
     job.status = "confirmed"
-    await save_job_db(session, job)
+    await save_job_db(ctx.session, job)
     return {"status": "confirmed", "counts": counts}
 
 
 @router.post("/ai/normalize/{job_id}")
-async def ai_rerun(job_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+async def ai_rerun(job_id: str, ctx: Context = Depends(require_permission("import_data"))) -> dict:
     """Повторный прогон пайплайна (после ответов или без них)."""
     from src.ai.pipelines.normalization import get_job_db, run_stage, save_job_db
 
-    job = await get_job_db(session, job_id)
+    job = await get_job_db(ctx.session, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job не найден")
+    if job.workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=404, detail="job не найден")
     run_stage(job)
-    await save_job_db(session, job)
+    await save_job_db(ctx.session, job)
     return job.snapshot()
 
 
 
 
 @router.post("/plans/{plan_id}/sprints/{sprint_no}/facts")
-async def load_facts(plan_id: str, sprint_no: int, body: dict, session: AsyncSession = Depends(get_session)) -> dict:
+async def load_facts(plan_id: str, sprint_no: int, body: dict,
+                     ctx: Context = Depends(require_permission("sprint_facts"))) -> dict:
     if not 1 <= sprint_no <= SPRINTS_PER_QUARTER:
         raise HTTPException(status_code=422, detail=f"sprint_no должен быть 1..{SPRINTS_PER_QUARTER}")
-    exists = (await session.execute(select(SprintFactORM).where(
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
+    if not plan_orm:
+        raise HTTPException(status_code=404, detail="план не найден")
+    exists = (await ctx.session.execute(select(SprintFactORM).where(
         SprintFactORM.plan_id == plan_id, SprintFactORM.sprint_no == sprint_no))).scalar_one_or_none()
     if exists:
         raise HTTPException(status_code=409, detail="факт этого спринта уже загружен")
 
     fact = SprintFactORM(
         plan_id=plan_id,
+        workspace_id=ctx.workspace_id,
         sprint_no=sprint_no,
         completed_sp=float(body.get("completed_sp", 0.0)),
         completed_task_ids=body.get("completed_task_ids", []),
         notes=body.get("notes", ""),
     )
-    session.add(fact)
-    await session.commit()
+    ctx.session.add(fact)
+    await ctx.session.commit()
     try:
-        new_plan = await _recompute_plan_version(session, plan_id, sprint_no)
+        new_plan = await _recompute_plan_version(ctx.session, plan_id, sprint_no, ctx.workspace_id)
     except Exception as e:
-        await session.rollback()
+        await ctx.session.rollback()
         raise HTTPException(status_code=422, detail=f"пересчёт не удался: {e}")
     return {"status": "accepted", "plan_id": plan_id, "sprint_no": sprint_no,
             "new_plan_id": new_plan.plan_id if new_plan else plan_id}
 
 
-async def _recompute_plan_version(session, plan_id: str, after_sprint: int):
+async def _recompute_plan_version(session, plan_id: str, after_sprint: int, workspace_id: str = "default"):
     """Создаёт новую версию плана: факты проведены, остаток квартала
     перераспределяется planner'ом (SP/color/роли, заём, разбитие).
     Возвращает новую PlanORM с parent-ссылкой; отдаёт child plan_id."""
-    tasks, engineers, history, deps = await load_world(session)
+    tasks, engineers, history, deps = await load_world(session, workspace_id=workspace_id)
     current_items = (await session.execute(select(PlanItemORM).where(
         PlanItemORM.plan_id == plan_id))).scalars().all()
     facts = (await session.execute(select(SprintFactORM).where(
@@ -339,6 +355,7 @@ async def _recompute_plan_version(session, plan_id: str, after_sprint: int):
 
     first_free = max(after_sprint, 0) + 1
     new_orm = PlanORM(
+        workspace_id=workspace_id,
         is_initial=False,
         parent_plan_id=plan_id,
         recomputed_after_sprint=after_sprint,
@@ -381,17 +398,17 @@ async def _recompute_plan_version(session, plan_id: str, after_sprint: int):
 
 @router.post("/plans/{plan_id}/recompute")
 async def recompute_endpoint(plan_id: str, after_sprint: int = 0,
-                             session: AsyncSession = Depends(get_session)) -> dict:
+                             ctx: Context = Depends(require_permission("recompute"))) -> dict:
     """Кнопка «Пересчитать»: создаёт новую версию плана (снапшот-цепочка)."""
-    plan_orm = await get_plan_orm(session, plan_id)
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
     if not plan_orm:
         raise HTTPException(status_code=404, detail="план не найден")
     if not 0 <= after_sprint <= SPRINTS_PER_QUARTER:
         raise HTTPException(status_code=422, detail=f"after_sprint должна быть 0..{SPRINTS_PER_QUARTER}")
     try:
-        new_plan = await _recompute_plan_version(session, plan_id, after_sprint)
+        new_plan = await _recompute_plan_version(ctx.session, plan_id, after_sprint, ctx.workspace_id)
     except Exception as e:
-        await session.rollback()
+        await ctx.session.rollback()
         raise HTTPException(status_code=422, detail=f"пересчёт не удался: {e}")
     return {"status": "recomputed", "new_plan_id": new_plan.plan_id,
             "parent_plan_id": plan_id, "after_sprint": after_sprint}
@@ -436,18 +453,18 @@ def _recomputed_plan(plan_before: Plan, done_task_ids: set[str]) -> Plan:
 
 
 @router.get("/plans/{plan_id}/warnings")
-async def plan_warnings(plan_id: str, session: AsyncSession = Depends(get_session)) -> list[dict]:
-    plan_orm = await get_plan_orm(session, plan_id)
+async def plan_warnings(plan_id: str, ctx: Context = Depends(require_context)) -> list[dict]:
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
     if not plan_orm:
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
-    items = await get_plan_items(session, plan_id)
+    items = await get_plan_items(ctx.session, plan_id)
     plan_before = _plan_from_orm(plan_id, items)
-    facts = (await session.execute(select(SprintFactORM).where(SprintFactORM.plan_id == plan_id))).scalars().all()
+    facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id == plan_id))).scalars().all()
     done_task_ids: set[str] = set()
     for f in facts:
         done_task_ids.update(str(x) for x in (f.completed_task_ids or []))
     after = _recomputed_plan(plan_before, done_task_ids)
-    tasks, engineers, history, deps = await load_world(session)
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     from src.services.replanner import compute_warnings
 
     warnings = compute_warnings(plan_before, after, sorted(done_task_ids), tasks, deps, engineers)
@@ -455,13 +472,13 @@ async def plan_warnings(plan_id: str, session: AsyncSession = Depends(get_sessio
 
 
 @router.get("/plans/{plan_id}/diff")
-async def plan_diff(plan_id: str, session: AsyncSession = Depends(get_session)) -> dict:
-    plan_orm = await get_plan_orm(session, plan_id)
+async def plan_diff(plan_id: str, ctx: Context = Depends(require_context)) -> dict:
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
     if not plan_orm:
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
-    items = await get_plan_items(session, plan_id)
+    items = await get_plan_items(ctx.session, plan_id)
     plan_before = _plan_from_orm(plan_id, items)
-    facts = (await session.execute(select(SprintFactORM).where(SprintFactORM.plan_id == plan_id))).scalars().all()
+    facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id == plan_id))).scalars().all()
     done_task_ids = {tid for f in facts for tid in (f.completed_task_ids or [])}
     after = _recomputed_plan(plan_before, done_task_ids)
     before_of = {i.task_id: s.sprint_no for s in plan_before.sprints for i in s.items}
@@ -476,22 +493,22 @@ async def plan_diff(plan_id: str, session: AsyncSession = Depends(get_session)) 
 
 
 @router.get("/plans/{plan_id}/metrics")
-async def plan_metrics(plan_id: str, session: AsyncSession = Depends(get_session)) -> dict:
-    plan_orm = await get_plan_orm(session, plan_id)
+async def plan_metrics(plan_id: str, ctx: Context = Depends(require_context)) -> dict:
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
     if not plan_orm:
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
-    items = await get_plan_items(session, plan_id)
+    items = await get_plan_items(ctx.session, plan_id)
     plan = _plan_from_orm(plan_id, items)
-    facts = (await session.execute(select(SprintFactORM).where(SprintFactORM.plan_id == plan_id))).scalars().all()
+    facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id == plan_id))).scalars().all()
     # факты считаются по всей цепочке версий (первоначальные спринты считаются
     # в знаменателе SP: спринты до пересчёта — их факт игнорируем уже не нужно)
-    initial = await _initial_plan_for(session, plan)
+    initial = await _initial_plan_for(ctx.session, plan)
     planned_sp_by_sprint: dict[int, float] = {}
     for s in initial.sprints:
         planned_sp_by_sprint[s.sprint_no] = sum(i.step_points_sp or 0.0 for i in s.items)
     done_sp_by_sprint = {f.sprint_no: f.completed_sp for f in facts}
     done_task_ids = {tid for f in facts for tid in (f.completed_task_ids or [])}
-    tasks_map, engineers, history, deps = await load_world(session)
+    tasks_map, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     initial_items = [
         {"task_id": i.task_id,
          "parent_id": tasks_map[i.task_id].parent_id if i.task_id in tasks_map else None,
@@ -525,11 +542,11 @@ async def _initial_plan_for(session, plan: Plan) -> Plan:
 
 
 @router.get("/plans/{plan_id}/tasks/{task_id}/explanation")
-async def task_explanation(plan_id: str, task_id: str, session: AsyncSession = Depends(get_session)) -> dict:
-    plan_orm = await get_plan_orm(session, plan_id)
+async def task_explanation(plan_id: str, task_id: str, ctx: Context = Depends(require_context)) -> dict:
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
     if not plan_orm:
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
-    items = await get_plan_items(session, plan_id)
+    items = await get_plan_items(ctx.session, plan_id)
     matches = [i for i in items if i.task_id == task_id]
     if not matches:
         raise HTTPException(status_code=404, detail=f"задача {task_id} не найдена в плане {plan_id}")
@@ -544,21 +561,21 @@ async def task_explanation(plan_id: str, task_id: str, session: AsyncSession = D
 
 
 @router.get("/plans/{plan_id}/bus-risk")
-async def plan_bus_risk_endpoint(plan_id: str, session: AsyncSession = Depends(get_session)) -> dict:
-    plan_orm = await get_plan_orm(session, plan_id)
+async def plan_bus_risk_endpoint(plan_id: str, ctx: Context = Depends(require_context)) -> dict:
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
     if not plan_orm:
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
-    items = await get_plan_items(session, plan_id)
+    items = await get_plan_items(ctx.session, plan_id)
     planned = [{"task_id": i.task_id, "sprint_no": i.sprint_no} for i in items
                if i.decision == PlanDecision.planned.value]
-    tasks, engineers, history, deps = await load_world(session)
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     from src.services.bus_factor import plan_bus_risk
     return plan_bus_risk(planned, tasks, engineers)
 
 
 @router.get("/bus-factor")
-async def bus_factor(session: AsyncSession = Depends(get_session)) -> dict:
-    tasks, engineers, history, deps = await load_world(session)
+async def bus_factor(ctx: Context = Depends(require_context)) -> dict:
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     from src.services.bus_factor import compute_bus_factor
 
     report = compute_bus_factor(engineers)
@@ -566,16 +583,16 @@ async def bus_factor(session: AsyncSession = Depends(get_session)) -> dict:
 
 
 @router.get("/star-map/summary")
-async def star_map(session: AsyncSession = Depends(get_session)) -> dict:
-    tasks, engineers, history, deps = await load_world(session)
+async def star_map(ctx: Context = Depends(require_context)) -> dict:
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     from src.services.starmap import star_map_summary
 
     return star_map_summary(engineers)
 
 
 @router.get("/teams")
-async def teams(session: AsyncSession = Depends(get_session)) -> list[dict]:
-    tasks, engineers, history, deps = await load_world(session)
+async def teams(ctx: Context = Depends(require_context)) -> list[dict]:
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     from src.services.starmap import teams_overview
 
     return teams_overview(engineers)
@@ -586,9 +603,10 @@ api_router = router
 # --- версии планов и история фактов (change 002b) -----------------------
 
 @router.get("/plans")
-async def plans_list(session: AsyncSession = Depends(get_session)) -> list[dict]:
+async def plans_list(ctx: Context = Depends(require_context)) -> list[dict]:
     """Все версии планов (цепочка снапшотов: initial → recompute)."""
-    rows = (await session.execute(select(PlanORM).order_by(PlanORM.created_at))).scalars().all()
+    rows = (await ctx.session.execute(select(PlanORM).where(
+        PlanORM.workspace_id == ctx.workspace_id).order_by(PlanORM.created_at))).scalars().all()
     out = []
     for r in rows:
         out.append({
@@ -602,17 +620,20 @@ async def plans_list(session: AsyncSession = Depends(get_session)) -> list[dict]
 
 
 @router.get("/plans/{plan_id}/facts")
-async def facts_list(plan_id: str, session: AsyncSession = Depends(get_session)) -> list[dict]:
+async def facts_list(plan_id: str, ctx: Context = Depends(require_context)) -> list[dict]:
     """Факты спринтов по всей цепочке версии (root → current)."""
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
+    if not plan_orm:
+        raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
     chain_ids = {plan_id}
     cur = plan_id
     while True:
-        orm = await get_plan_orm(session, cur)
+        orm = await get_plan_orm(ctx.session, cur)
         if not orm or not orm.parent_plan_id or orm.parent_plan_id in chain_ids:
             break
         chain_ids.add(orm.parent_plan_id)
         cur = orm.parent_plan_id
-    facts = (await session.execute(select(SprintFactORM).where(
+    facts = (await ctx.session.execute(select(SprintFactORM).where(
         SprintFactORM.plan_id.in_(chain_ids)))).scalars().all()
     return [{
         "sprint_no": f.sprint_no,
@@ -627,9 +648,8 @@ async def facts_list(plan_id: str, session: AsyncSession = Depends(get_session))
 @router.get("/tasks")
 async def tasks_list(team_id: str | None = None, status: str | None = None,
                      search: str | None = None,
-                     session: AsyncSession = Depends(get_session),
-                     workspace_id: str = Depends(get_current_workspace_id)) -> list[dict]:
-    tasks, engineers, history, deps = await load_world(session, workspace_id=workspace_id)
+                     ctx: Context = Depends(require_context)) -> list[dict]:
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     dep_map: dict[str, list[dict]] = defaultdict(list)
     for blocking, blocked in deps:
         dep_map[blocked].append({"blocking_task_id": blocking})
@@ -653,8 +673,8 @@ async def tasks_list(team_id: str | None = None, status: str | None = None,
 
 
 @router.get("/tasks/{task_id}")
-async def task_detail(task_id: str, session: AsyncSession = Depends(get_session)) -> dict:
-    tasks, engineers, history, deps = await load_world(session)
+async def task_detail(task_id: str, ctx: Context = Depends(require_context)) -> dict:
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     task = tasks.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="задача не найдена")
@@ -668,8 +688,8 @@ async def task_detail(task_id: str, session: AsyncSession = Depends(get_session)
 async def engineers_list(team_id: str | None = None, role: str | None = None,
                           grade: str | None = None, skill: str | None = None,
                           min_rate: float | None = None,
-                          session: AsyncSession = Depends(get_session)) -> list[dict]:
-    tasks, engineers, history, deps = await load_world(session)
+                          ctx: Context = Depends(require_context)) -> list[dict]:
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     out = []
     for e in engineers:
         if team_id and e.team_id != team_id:
@@ -687,10 +707,10 @@ async def engineers_list(team_id: str | None = None, role: str | None = None,
 
 
 @router.get("/engineers/{engineer_id}")
-async def engineer_detail(engineer_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+async def engineer_detail(engineer_id: str, ctx: Context = Depends(require_context)) -> dict:
     from src.services.starmap import engineer_profile
 
-    tasks, engineers, history, deps = await load_world(session)
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     profile = engineer_profile(engineers, engineer_id)
     if not profile:
         raise HTTPException(status_code=404, detail="не найден")
@@ -698,14 +718,14 @@ async def engineer_detail(engineer_id: str, session: AsyncSession = Depends(get_
 
 
 @router.get("/dependencies")
-async def dependencies_list(session: AsyncSession = Depends(get_session)) -> list[dict]:
-    tasks, engineers, history, deps = await load_world(session)
+async def dependencies_list(ctx: Context = Depends(require_context)) -> list[dict]:
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     return [{"blocking_task_id": a, "blocked_task_id": b} for a, b in deps]
 
 
 @router.get("/teams/{team_id}")
-async def team_detail(team_id: str, session: AsyncSession = Depends(get_session)) -> dict:
-    tasks, engineers, history, deps = await load_world(session)
+async def team_detail(team_id: str, ctx: Context = Depends(require_context)) -> dict:
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     from src.services.capacity import team_capacity_sp
 
     members = [e for e in engineers if e.team_id == team_id]
@@ -723,7 +743,7 @@ async def team_detail(team_id: str, session: AsyncSession = Depends(get_session)
 # --- ручки приоритетов и отмен (change 003) -----------------------------
 
 @router.put("/tasks/{task_id}/priority")
-async def set_priority(task_id: str, body: dict, session: AsyncSession = Depends(get_session)) -> dict:
+async def set_priority(task_id: str, body: dict, ctx: Context = Depends(require_permission("edit_priority"))) -> dict:
     """human-in-loop: приоритет задачи (меньше — раньше)."""
     priority = body.get("priority")
     if priority is None:
@@ -732,23 +752,24 @@ async def set_priority(task_id: str, body: dict, session: AsyncSession = Depends
         priority = int(priority)
     except (TypeError, ValueError):
         raise HTTPException(status_code=422, detail="priority — целое число")
-    task = (await session.execute(select(TaskORM).where(TaskORM.task_id == task_id))).scalar_one_or_none()
+    task = (await ctx.session.execute(select(TaskORM).where(
+        TaskORM.task_id == task_id, TaskORM.workspace_id == ctx.workspace_id))).scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="задача не найдена")
     task.priority = priority
     task.source = "manual"
-    await session.commit()
+    await ctx.session.commit()
     return {"status": "updated", "task_id": task_id, "priority": priority}
 
 
 @router.post("/plans/{plan_id}/tasks/{task_id}/cancel-request")
 async def cancel_request(plan_id: str, task_id: str,
-                         session: AsyncSession = Depends(get_session)) -> dict:
+                         ctx: Context = Depends(require_permission("cancel_request"))) -> dict:
     """Сервис предлагает отмену: перевод postponed-задачи в cancelled_pending."""
-    plan_orm = await get_plan_orm(session, plan_id)
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
     if not plan_orm:
         raise HTTPException(status_code=404, detail="план не найден")
-    items = (await session.execute(select(PlanItemORM).where(
+    items = (await ctx.session.execute(select(PlanItemORM).where(
         PlanItemORM.plan_id == plan_id, PlanItemORM.task_id == task_id))).scalars().all()
     if not items:
         raise HTTPException(status_code=404, detail="задача не в плане")
@@ -756,18 +777,18 @@ async def cancel_request(plan_id: str, task_id: str,
         if item.decision == PlanDecision.postponed.value:
             item.decision = PlanDecision.cancel_pending.value
             item.reason = (item.reason or "") + " (кандидат на отмену — ресурс/роли недоступны)"
-    await session.commit()
+    await ctx.session.commit()
     return {"status": "pending_confirmation", "task_id": task_id}
 
 
 @router.post("/plans/{plan_id}/tasks/{task_id}/confirm-cancel")
 async def confirm_cancel(plan_id: str, task_id: str,
-                         session: AsyncSession = Depends(get_session)) -> dict:
+                         ctx: Context = Depends(require_permission("confirm_cancel"))) -> dict:
     """Лид подтверждает отмену: cancelled_pending → cancelled."""
-    plan_orm = await get_plan_orm(session, plan_id)
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
     if not plan_orm:
         raise HTTPException(status_code=404, detail="план не найден")
-    items = (await session.execute(select(PlanItemORM).where(
+    items = (await ctx.session.execute(select(PlanItemORM).where(
         PlanItemORM.plan_id == plan_id, PlanItemORM.task_id == task_id))).scalars().all()
     if not items:
         raise HTTPException(status_code=404, detail="задача не в плане")
@@ -777,9 +798,7 @@ async def confirm_cancel(plan_id: str, task_id: str,
         if item.decision == PlanDecision.cancel_pending.value:
             if "(кандидат на отмену" in (item.reason or ""):
                 item.reason = item.reason.replace("(кандидат на отмену", "(отмена подтверждена: ")
-            elif item.reason:
-                item.reason = item.reason.replace("(кандидат на отмену", "(отмена подтверждена: ")
             else:
                 item.reason = "отмена подтверждена лидом"
-    await session.commit()
+    await ctx.session.commit()
     return {"status": "cancelled", "task_id": task_id}

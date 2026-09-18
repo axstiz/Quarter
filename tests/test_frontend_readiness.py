@@ -13,7 +13,7 @@ def anyio_backend():
 
 
 @pytest_asyncio.fixture()
-async def client(tmp_path, monkeypatch):
+async def client(tmp_path, monkeypatch, auth):
     from src.core.config import settings
     monkeypatch.setattr(settings, "database_url", f"sqlite+aiosqlite:///{tmp_path / 't.db'}")
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -28,13 +28,13 @@ async def client(tmp_path, monkeypatch):
     await init_db()
     from src.main import app
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t", headers=auth) as ac:
         yield ac
     await session_mod.engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_cors_headers(client):
+async def test_cors_headers(client, auth):
     """change 004: CORS-заголовки в ответе и preflight (dev-сервер фронта на другом origin)."""
     r = await client.options("/api/v1/bus-factor", headers={
         "Origin": "http://localhost:5173",
@@ -47,7 +47,7 @@ async def test_cors_headers(client):
 
 
 @pytest.mark.asyncio
-async def test_cors_specific_origin(tmp_path, monkeypatch):
+async def test_cors_specific_origin(tmp_path, monkeypatch, auth):
     """change 004: CORS_ORIGINS env — конкретный origin разрешён, прочие нет."""
     import sys
     from src.core.config import settings
@@ -67,7 +67,7 @@ async def test_cors_specific_origin(tmp_path, monkeypatch):
         await init_db()
         from src.main import app
 
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t", headers=auth) as ac:
             r = await ac.get("/healthz", headers={"Origin": "http://localhost:3000"})
             assert r.headers.get("access-control-allow-origin") == "http://localhost:3000"
             r = await ac.get("/healthz", headers={"Origin": "http://evil.example"})
@@ -78,7 +78,7 @@ async def test_cors_specific_origin(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_bus_risk_endpoint(client):
+async def test_bus_risk_endpoint(client, auth):
     """change 004: ручка bus-risk на демо-датасете."""
     r = await client.post("/api/v1/data/import")
     assert r.status_code == 200

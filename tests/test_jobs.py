@@ -6,8 +6,8 @@ from src.main import app
 
 
 @pytest.mark.asyncio
-async def test_job_db_persistence():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+async def test_job_db_persistence(auth):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test", headers=auth) as client:
         # Upload file
         resp = await client.post(
             "/api/v1/data/upload",

@@ -102,6 +102,7 @@ class UploadJob:
     def __init__(self, job_id: str, filename: str, path: Path):
         self.job_id = job_id
         self.filename = filename
+        self.workspace_id = "default"
         self.path = path
         self.status: UploadStatus = "uploaded"
         self.tables: list[list[dict[str, str]]] = []
@@ -153,7 +154,6 @@ class UploadJob:
 
 
 async def save_job_db(session, job: UploadJob) -> None:
-    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
     from src.db.models import UploadJobORM
 
     UploadJob.JOBS[job.job_id] = job
@@ -171,6 +171,7 @@ async def save_job_db(session, job: UploadJob) -> None:
     orm.column_guesses = d["column_guesses"]
     orm.questions = d["questions"]
     orm.answers = d["answers"]
+    orm.workspace_id = getattr(job, "workspace_id", "default")
     await session.commit()
 
 
@@ -196,6 +197,7 @@ async def get_job_db(session, job_id: str) -> UploadJob | None:
         "answers": orm.answers,
     }
     job = UploadJob.from_dict(data)
+    job.workspace_id = orm.workspace_id or "default"
     UploadJob.JOBS[job.job_id] = job
     return job
 

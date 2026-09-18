@@ -14,7 +14,7 @@ def anyio_backend():
 
 
 @pytest_asyncio.fixture()
-async def client(tmp_path, monkeypatch):
+async def client(tmp_path, monkeypatch, auth):
     from src.core.config import settings
     from src.db.session import init_db
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -32,19 +32,19 @@ async def client(tmp_path, monkeypatch):
     await init_db()
     from src.main import app
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t", headers=auth) as ac:
         yield ac
     await session_mod.engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_healthz(client):
+async def test_healthz(client, auth):
     r = await client.get("/healthz")
     assert r.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_import_generated_facts_cycle(client):
+async def test_import_generated_facts_cycle(client, auth):
     r = await client.post("/api/v1/data/import")
     assert r.status_code == 200
     counts = r.json()["counts"]
@@ -73,7 +73,7 @@ async def test_import_generated_facts_cycle(client):
 
 
 @pytest.mark.asyncio
-async def test_plan_404(client):
+async def test_plan_404(client, auth):
     r = await client.get("/api/v1/plans/nonexistent")
     assert r.status_code == 404
     r = await client.get("/api/v1/plans/nonexistent/tasks/X/explanation")
@@ -81,7 +81,7 @@ async def test_plan_404(client):
 
 
 @pytest.mark.asyncio
-async def test_bus_factor_and_starmap(client):
+async def test_bus_factor_and_starmap(client, auth):
     r = await client.post("/api/v1/data/import")
     assert r.status_code == 200
     r = await client.get("/api/v1/bus-factor")
@@ -99,7 +99,7 @@ async def test_bus_factor_and_starmap(client):
 
 
 @pytest.mark.asyncio
-async def test_data_import_counts(client):
+async def test_data_import_counts(client, auth):
     r = await client.post("/api/v1/data/import")
     assert r.status_code == 200
     counts = r.json()["counts"]
@@ -109,7 +109,7 @@ async def test_data_import_counts(client):
 
 
 @pytest.mark.asyncio
-async def test_plans_versions_and_facts(client, sample_xlsx):
+async def test_plans_versions_and_facts(client, sample_xlsx, auth):
     """Change 002b: GET /plans (версии), GET /plans/{id}/facts, parent_plan_id в GET plans/{id}."""
     r = await client.post("/api/v1/data/upload", files={"file": ("d.xlsx", sample_xlsx.read_bytes())})
     assert r.status_code == 201
@@ -148,7 +148,7 @@ async def test_plans_versions_and_facts(client, sample_xlsx):
 
 
 @pytest.mark.asyncio
-async def test_reimport_preserves_plans(client):
+async def test_reimport_preserves_plans(client, auth):
     """Фикс reset_dataset_tables: повторный импорт не затирает планы и факты."""
     r = await client.post("/api/v1/data/import")
     assert r.status_code == 200
@@ -175,7 +175,7 @@ async def test_reimport_preserves_plans(client):
 
 
 @pytest.mark.asyncio
-async def test_manual_records_survive_reimport(client):
+async def test_manual_records_survive_reimport(client, auth):
     """Спека data: повторный импорт не затирает source=manual (fix-manual-records-survive-reimport)."""
     r = await client.post("/api/v1/data/import")
     assert r.status_code == 200
@@ -206,7 +206,7 @@ async def test_manual_records_survive_reimport(client):
 
 
 @pytest.mark.asyncio
-async def test_crud_teams_dependencies_full(client):
+async def test_crud_teams_dependencies_full(client, auth):
     """fix-crud-teams-dependencies: PUT/DELETE для teams и dependencies (по паре)."""
     await client.post("/api/v1/data/import")
 

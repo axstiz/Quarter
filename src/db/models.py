@@ -159,6 +159,10 @@ class UserORM(Base):
 class UploadJobORM(Base):
     __tablename__ = "upload_jobs"
     job_id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
+    stage: Mapped[str] = mapped_column(String, default="")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(String, default="")
     filename: Mapped[str] = mapped_column(String)
     file_path: Mapped[str] = mapped_column(String, default="")
     status: Mapped[str] = mapped_column(String, default="uploaded")

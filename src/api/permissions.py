@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Callable
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.context import Context, require_context
 from src.db.models import AuditLogORM, RoleOverrideORM, UserOverrideORM
 from src.db.session import get_session
 
@@ -64,37 +65,31 @@ async def check_permission(
     return role in default_roles
 
 
-def require_permission(permission: str) -> Callable:
-    async def dependency(
-        x_role: str = Header("editor", alias="X-User-Role"),
-        x_user_id: str | None = Header(None, alias="X-User-Id"),
-        x_workspace_id: str = Header("default", alias="X-Workspace-Id"),
-        session: AsyncSession = Depends(get_session),
-    ):
+def require_permission(permission: str):
+    """Требует разрешение; роль и workspace берутся из контекста (membership),
+    а не из заголовков — подделать со стороны клиента невозможно."""
+    async def dependency(ctx: Context = Depends(require_context)) -> Context:
         allowed = await check_permission(
             permission=permission,
-            role=x_role.lower(),
-            user_id=x_user_id,
-            workspace_id=x_workspace_id,
-            session=session,
+            role=ctx.role,
+            user_id=ctx.user.id,
+            workspace_id=ctx.workspace_id,
+            session=ctx.session,
         )
         if not allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Отказано в доступе: требуется разрешение '{permission}'",
             )
-        return True
+        return ctx
 
     return dependency
 
 
 @permissions_router.get("/matrix")
-async def get_matrix(
-    workspace_id: str = Header("default", alias="X-Workspace-Id"),
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    role_ovs = (await session.execute(select(RoleOverrideORM).where(
-        RoleOverrideORM.workspace_id == workspace_id
+async def get_matrix(ctx: Context = Depends(require_context)) -> dict:
+    role_ovs = (await ctx.session.execute(select(RoleOverrideORM).where(
+        RoleOverrideORM.workspace_id == ctx.workspace_id
     ))).scalars().all()
 
     ov_map = {(r.role, r.permission): r.enabled for r in role_ovs}
@@ -111,16 +106,14 @@ async def get_matrix(
             else:
                 matrix[perm][r] = r in default_allowed
 
-    return {"workspace_id": workspace_id, "matrix": matrix}
+    return {"workspace_id": ctx.workspace_id, "matrix": matrix}
 
 
 @permissions_router.patch("/roles/{role}")
 async def update_role_permission(
     role: str,
     body: UpdatePermissionRequest,
-    actor_id: str = Header("system", alias="X-User-Id"),
-    workspace_id: str = Header("default", alias="X-Workspace-Id"),
-    session: AsyncSession = Depends(get_session),
+    ctx: Context = Depends(require_permission("workspace_admin")),
 ) -> dict:
     if role.lower() == "admin":
         raise HTTPException(status_code=400, detail="Права администратора неотчуждаемы")
@@ -128,43 +121,40 @@ async def update_role_permission(
     if body.permission not in DEFAULT_MATRIX:
         raise HTTPException(status_code=422, detail=f"Неизвестное разрешение: {body.permission}")
 
-    ov = (await session.execute(select(RoleOverrideORM).where(
-        RoleOverrideORM.workspace_id == workspace_id,
+    ov = (await ctx.session.execute(select(RoleOverrideORM).where(
+        RoleOverrideORM.workspace_id == ctx.workspace_id,
         RoleOverrideORM.role == role.lower(),
         RoleOverrideORM.permission == body.permission,
     ))).scalar_one_or_none()
 
     if not ov:
         ov = RoleOverrideORM(
-            workspace_id=workspace_id,
+            workspace_id=ctx.workspace_id,
             role=role.lower(),
             permission=body.permission,
             enabled=body.enabled,
         )
-        session.add(ov)
+        ctx.session.add(ov)
     else:
         ov.enabled = body.enabled
 
     audit = AuditLogORM(
-        workspace_id=workspace_id,
-        actor_id=actor_id,
+        workspace_id=ctx.workspace_id,
+        actor_id=ctx.user.id,
         action="update_permission",
         target=f"role:{role}:{body.permission}",
         details={"enabled": body.enabled},
     )
-    session.add(audit)
-    await session.commit()
+    ctx.session.add(audit)
+    await ctx.session.commit()
 
-    return {"workspace_id": workspace_id, "role": role, "permission": body.permission, "enabled": body.enabled}
+    return {"workspace_id": ctx.workspace_id, "role": role, "permission": body.permission, "enabled": body.enabled}
 
 
 @permissions_router.get("/audit")
-async def get_audit_logs(
-    workspace_id: str = Header("default", alias="X-Workspace-Id"),
-    session: AsyncSession = Depends(get_session),
-) -> list[dict]:
-    logs = (await session.execute(select(AuditLogORM).where(
-        AuditLogORM.workspace_id == workspace_id
+async def get_audit_logs(ctx: Context = Depends(require_context)) -> list[dict]:
+    logs = (await ctx.session.execute(select(AuditLogORM).where(
+        AuditLogORM.workspace_id == ctx.workspace_id
     ).order_by(AuditLogORM.created_at.desc()))).scalars().all()
 
     return [{
