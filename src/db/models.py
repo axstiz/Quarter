@@ -118,3 +118,13 @@ class SprintFactORM(Base):
     completed_task_ids: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
     notes: Mapped[str] = mapped_column(String, default="")
     __table_args__ = (UniqueConstraint("plan_id", "sprint_no", name="uq_fact_per_sprint"),)
+
+
+class UserORM(Base):
+    __tablename__ = "users"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
+    email: Mapped[str] = mapped_column(String, unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String)
+    role: Mapped[str] = mapped_column(String, default="editor")
+    created_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now())
+
