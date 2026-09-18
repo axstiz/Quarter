@@ -8,19 +8,24 @@ import secrets
 import time
 from typing import Any
 
+import bcrypt
+
 from src.core.config import settings
 
 
 def hash_password(password: str) -> str:
-    """Hashes a password using PBKDF2-HMAC-SHA256 with a random salt."""
-    salt = secrets.token_hex(16)
-    key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000)
-    return f"{salt}${key.hex()}"
+    """bcrypt с автогенерируемой солью; формат — тот же 'alg$hash'."""
+    return "bcrypt$" + bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=10)).decode("utf-8")
 
 
 def verify_password(password: str, hashed_password: str) -> bool:
-    """Verifies a password against its PBKDF2 hash."""
+    """Проверяет пароль; поддерживает и legacy PBKDF2 (миграция без сброса паролей)."""
     try:
+        if hashed_password.startswith("bcrypt$"):
+            return bcrypt.checkpw(password.encode("utf-8"), hashed_password[7:].encode("utf-8"))
+        # legacy: PBKDF2-HMAC-SHA256
+        import hashlib
+
         salt, key_hex = hashed_password.split("$", 1)
         expected_key = bytes.fromhex(key_hex)
         key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000)

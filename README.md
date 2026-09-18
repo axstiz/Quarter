@@ -174,6 +174,37 @@ uv run uvicorn src.main:app --reload   # Swagger: http://localhost:8000/docs
 
 Тесты: `uv run pytest tests/ -q` (SQLite in-tmp, без docker).
 
+### Аутентификация и workspace (changes 005/008/009)
+
+```bash
+# демо-вход (reader|editor|admin), возвращает JWT
+curl -X POST localhost:8000/auth/demo-login \
+     -H 'content-type: application/json' -d '{"role":"editor"}'
+
+# дальше все /api/v1-ручки требуют заголовок
+#   Authorization: Bearer <token>
+# и (для не-default workspace) X-Workspace-Id: <id>
+#
+# роль вычисляется сервером по членству в workspace (таблица memberships);
+# заголовки X-User-Role / X-User-Id игнорируются.
+```
+
+Читатель — только просмотр; редактор — план/факты/приоритеты; админ — подтверждение отмен, участники, матрица прав (`GET/PATCH /permissions/...`).
+
+### Фоновые задачи (change 007)
+
+По умолчанию upload-обработка идёт в процессе API (JOBS_MODE=sync или Redis не поднят).
+С Redis/воркером (arq) — фоново:
+
+```bash
+docker compose --profile jobs up -d   # поднимает redis + arq-воркер
+uv run uvicorn src.main:app --reload  # JOBS_MODE=queue | sync | auto (default: auto)
+```
+
+`POST /api/v1/data/upload` возвращает job сразу (status `uploaded`); воркер ведёт
+задачу через `uploaded → mapping → questions|ready`, делает повтор (2 попытки),
+по таймауту/ошибке — `failed` с причиной. Повторный прогон: `POST /api/v1/ai/normalize/{job_id}`.
+
 ### API (v1)
 
 Импорт данных → план → факты спринта → риски и метрики:

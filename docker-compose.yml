@@ -14,5 +14,24 @@ services:
       interval: 3s
       retries: 10
 
+  # change 007: redis + arq-воркер — только в профиле jobs
+  # (docker compose --profile jobs up)
+  redis:
+    image: redis:7-alpine
+    profiles: [jobs]
+    ports:
+      - "6379:6379"
+
+  worker:
+    image: postcode-planner:latest
+    profiles: [jobs]
+    depends_on:
+      - redis
+    command: arq src.ai.jobs_worker.WorkerSettings
+    environment:
+      POSTCODE_DATABASE_URL: postgresql+asyncpg://postcode:postcode@db:5432/postcode
+      POSTCODE_REDIS_URL: redis://redis:6379/0
+      POSTCODE_JOBS_MODE: queue
+
 volumes:
   pgdata:

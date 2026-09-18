@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import tempfile
 import uuid
 
@@ -49,6 +50,7 @@ from src.services.replanner import (
 )
 
 router = APIRouter(prefix="/api/v1")
+logger = logging.getLogger(__name__)
 
 
 async def load_world(session, workspace_id: str = "default") -> tuple[dict[str, Task], list, list, dict]:
@@ -220,20 +222,45 @@ JOBS_TMP_DIR.mkdir(exist_ok=True)
 
 @router.post("/data/upload", status_code=201)
 async def data_upload(file: UploadFile = File(...), ctx: Context = Depends(require_permission("import_data"))) -> dict:
-    """Загрузка файла xlsx/csv/json в пайплайн normalization."""
+    """Загрузка файла xlsx/csv/json в пайплайн normalization.
+
+    Redis/воркер: job ставится в очередь (статус uploaded → mapping → …).
+    Деградация: нет Redis или JOBS_MODE=sync → тот же пайплайн в процессе.
+    """
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in (".xlsx", ".csv", ".json"):
         raise HTTPException(status_code=422, detail=f"поддерживаются xlsx/csv/json, получен {suffix}")
     dest = JOBS_TMP_DIR / f"{uuid.uuid4().hex}{suffix}"
     dest.write_bytes(await file.read())
     from src.ai.pipelines.normalization import new_job, save_job_db
+    from src.ai.jobs_worker import get_queue
+    from src.ai.pipelines import normalization as _norm
 
     try:
-        job = new_job(file.filename or dest.name, dest)
+        job = _norm.UploadJob(uuid.uuid4().hex, file.filename or dest.name, dest)
         job.workspace_id = ctx.workspace_id
-        await save_job_db(ctx.session, job)
+        await save_job_db(ctx.session, job)  # сохраняем как uploaded — до постановки задачи
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"не удалось разобрать файл: {e}")
+
+    queue = await get_queue()
+    if queue is not None:
+        try:
+            await queue.enqueue_job("run_normalization", job.job_id)
+            return job.snapshot()
+        except Exception as e:
+            logger.warning("enqueue не удался (%s): обработка синхронно", e)
+    # деградация: синхронный прогон
+    from src.ai.pipelines.normalization import run_stage, save_job_db as _save
+    try:
+        run_stage(job)
+        await _save(ctx.session, job)
+    except Exception as e:
+        from src.ai.pipelines.normalization import get_job_db
+
+        job.status = "failed"
+        await _save(ctx.session, job)
+        raise HTTPException(status_code=422, detail=f"не удалось обработать файл: {e}")
     return job.snapshot()
 
 
@@ -452,6 +479,14 @@ def _recomputed_plan(plan_before: Plan, done_task_ids: set[str]) -> Plan:
     return after
 
 
+async def _latest_child_orm(session, plan_id: str) -> PlanORM | None:
+    """Последняя версия плана, пересчитанная из данной (child в цепочке)."""
+    rows = (await session.execute(select(PlanORM).where(
+        PlanORM.parent_plan_id == plan_id
+    ).order_by(PlanORM.created_at.desc()))).scalars().all()
+    return rows[0] if rows else None
+
+
 @router.get("/plans/{plan_id}/warnings")
 async def plan_warnings(plan_id: str, ctx: Context = Depends(require_context)) -> list[dict]:
     plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
@@ -463,7 +498,13 @@ async def plan_warnings(plan_id: str, ctx: Context = Depends(require_context)) -
     done_task_ids: set[str] = set()
     for f in facts:
         done_task_ids.update(str(x) for x in (f.completed_task_ids or []))
-    after = _recomputed_plan(plan_before, done_task_ids)
+    # если уже есть пересчитанная версия (child) — риски считаем от неё,
+    # а не от виртуального сдвига
+    child = await _latest_child_orm(ctx.session, plan_id)
+    if child is not None:
+        after = _plan_from_orm(child.plan_id, await get_plan_items(ctx.session, child.plan_id))
+    else:
+        after = _recomputed_plan(plan_before, done_task_ids)
     tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     from src.services.replanner import compute_warnings
 
@@ -480,7 +521,11 @@ async def plan_diff(plan_id: str, ctx: Context = Depends(require_context)) -> di
     plan_before = _plan_from_orm(plan_id, items)
     facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id == plan_id))).scalars().all()
     done_task_ids = {tid for f in facts for tid in (f.completed_task_ids or [])}
-    after = _recomputed_plan(plan_before, done_task_ids)
+    child = await _latest_child_orm(ctx.session, plan_id)
+    if child is not None:
+        after = _plan_from_orm(child.plan_id, await get_plan_items(ctx.session, child.plan_id))
+    else:
+        after = _recomputed_plan(plan_before, done_task_ids)
     before_of = {i.task_id: s.sprint_no for s in plan_before.sprints for i in s.items}
     after_of = {i.task_id: s.sprint_no for s in after.sprints for i in s.items}
     shifted = [
