@@ -142,7 +142,7 @@ async def generate_plan_endpoint(
     if not tasks:
         raise HTTPException(status_code=400, detail="нет данных в базе; сначала POST /api/v1/data/import")
     plan = generate_plan(PlannerInput(list(tasks.values()), engineers, history, deps))
-    plan_orm = PlanORM(workspace_id=workspace_id, is_initial=True)
+    plan_orm = PlanORM(workspace_id=workspace_id, is_initial=True, created_by=ctx.user.id)
     ctx.session.add(plan_orm)
     await ctx.session.flush()
     for sprint in plan.sprints:
@@ -355,11 +355,12 @@ async def load_facts(plan_id: str, sprint_no: int, body: dict,
         completed_sp=float(body.get("completed_sp", 0.0)),
         completed_task_ids=body.get("completed_task_ids", []),
         notes=body.get("notes", ""),
+        author_id=ctx.user.id,
     )
     ctx.session.add(fact)
     await ctx.session.commit()
     try:
-        new_plan = await _recompute_plan_version(ctx.session, plan_id, sprint_no, ctx.workspace_id)
+        new_plan = await _recompute_plan_version(ctx.session, plan_id, sprint_no, ctx.workspace_id, ctx.user.id)
     except Exception as e:
         await ctx.session.rollback()
         raise HTTPException(status_code=422, detail=f"пересчёт не удался: {e}")
@@ -367,7 +368,7 @@ async def load_facts(plan_id: str, sprint_no: int, body: dict,
             "new_plan_id": new_plan.plan_id if new_plan else plan_id}
 
 
-async def _recompute_plan_version(session, plan_id: str, after_sprint: int, workspace_id: str = "default"):
+async def _recompute_plan_version(session, plan_id: str, after_sprint: int, workspace_id: str = "default", author_id: str = "system"):
     """Создаёт новую версию плана: факты проведены, остаток квартала
     перераспределяется planner'ом (SP/color/роли, заём, разбитие).
     Возвращает новую PlanORM с parent-ссылкой; отдаёт child plan_id."""
@@ -386,6 +387,7 @@ async def _recompute_plan_version(session, plan_id: str, after_sprint: int, work
         is_initial=False,
         parent_plan_id=plan_id,
         recomputed_after_sprint=after_sprint,
+        created_by=author_id,
     )
     session.add(new_orm)
     await session.flush()
@@ -433,7 +435,7 @@ async def recompute_endpoint(plan_id: str, after_sprint: int = 0,
     if not 0 <= after_sprint <= SPRINTS_PER_QUARTER:
         raise HTTPException(status_code=422, detail=f"after_sprint должна быть 0..{SPRINTS_PER_QUARTER}")
     try:
-        new_plan = await _recompute_plan_version(ctx.session, plan_id, after_sprint, ctx.workspace_id)
+        new_plan = await _recompute_plan_version(ctx.session, plan_id, after_sprint, ctx.workspace_id, ctx.user.id)
     except Exception as e:
         await ctx.session.rollback()
         raise HTTPException(status_code=422, detail=f"пересчёт не удался: {e}")
@@ -659,6 +661,7 @@ async def plans_list(ctx: Context = Depends(require_context)) -> list[dict]:
             "is_initial": r.is_initial,
             "parent_plan_id": r.parent_plan_id,
             "recomputed_after_sprint": r.recomputed_after_sprint,
+            "created_by": r.created_by,
             "created_at": str(r.created_at),
         })
     return out
@@ -821,7 +824,7 @@ async def cancel_request(plan_id: str, task_id: str,
     for item in items:
         if item.decision == PlanDecision.postponed.value:
             item.decision = PlanDecision.cancel_pending.value
-            item.reason = (item.reason or "") + " (кандидат на отмену — ресурс/роли недоступны)"
+            item.reason = (item.reason or "") + f" (кандидат на отмену — ресурс/роли недоступны; предложил {ctx.user.email})"
     await ctx.session.commit()
     return {"status": "pending_confirmation", "task_id": task_id}
 
@@ -842,8 +845,9 @@ async def confirm_cancel(plan_id: str, task_id: str,
     for item in items:
         if item.decision == PlanDecision.cancel_pending.value:
             if "(кандидат на отмену" in (item.reason or ""):
-                item.reason = item.reason.replace("(кандидат на отмену", "(отмена подтверждена: ")
+                item.reason = item.reason.replace(
+                    "(кандидат на отмену", f"(отмена подтверждена {ctx.user.email}: ")
             else:
-                item.reason = "отмена подтверждена лидом"
+                item.reason = f"отмена подтверждена {ctx.user.email} (лидом)"
     await ctx.session.commit()
     return {"status": "cancelled", "task_id": task_id}
