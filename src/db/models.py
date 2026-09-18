@@ -128,3 +128,19 @@ class UserORM(Base):
     role: Mapped[str] = mapped_column(String, default="editor")
     created_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now())
 
+
+class UploadJobORM(Base):
+    __tablename__ = "upload_jobs"
+    job_id: Mapped[str] = mapped_column(String, primary_key=True)
+    filename: Mapped[str] = mapped_column(String)
+    file_path: Mapped[str] = mapped_column(String, default="")
+    status: Mapped[str] = mapped_column(String, default="uploaded")
+    tables: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    rows_by_entity: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    unmapped_columns: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    column_guesses: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    questions: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    answers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now())
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now(), onupdate=func.now())
+
