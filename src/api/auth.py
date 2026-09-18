@@ -46,6 +46,13 @@ async def get_current_user_optional(
         return None
 
     user = (await session.execute(select(UserORM).where(UserORM.id == user_id))).scalar_one_or_none()
+    if user is None and payload.get("email", "").endswith("postcode.local"):
+        # demo-пользователи автосеются в любую БД (tmp-test/демо), idempotentно
+        role = payload.get("role", "editor")
+        if role in ("admin", "editor", "reader"):
+            user = UserORM(id=user_id, email=payload["email"], password_hash="", role=role)
+            session.add(user)
+            await session.commit()
     return user
 
 

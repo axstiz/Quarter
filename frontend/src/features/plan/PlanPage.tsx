@@ -16,6 +16,7 @@ import { LoadView } from './LoadView'
 import { PriorityView } from './PriorityView'
 import { RiskPanelContent } from './RiskPanel'
 import { GanttView } from './GanttView'
+import { RolesView } from './RolesView'
 import { TaskPanelContent } from './TaskPanel'
 import { Panel } from '@/components/ui/Panel'
 
@@ -35,6 +36,7 @@ export function PlanPage() {
 
   const model = useMemo(() => (plan.data ? buildPlanModel(plan.data, tasks.data ?? []) : null), [plan.data, tasks.data])
   const risks = useMemo(() => (model ? tasksAtRisk(model.tasks.values(), bus.data) : []), [model, bus.data])
+  const fixedSprints = useMemo(() => new Set(facts.data?.map((f) => f.sprint_no)), [facts.data])
   const latestId = versions.data?.at(-1)?.plan_id
   const readOnly = !!planId && !!latestId && planId !== latestId
 
@@ -77,7 +79,7 @@ export function PlanPage() {
   const doneCount = summaries.filter((t) => t.decision === 'done_actual').length
   const outsideCount = model?.outside.filter((t) => t.decision !== 'cancelled').length ?? 0
   const spLeft = inPlan.reduce((a, t) => a + t.plannedSp, 0)
-  const current = view ?? 'sprints'
+  const current = view ?? 'roles'
   const panelKey = taskId ? `task:${taskId}` : riskPanel === '1' ? 'risks' : null
 
   const openTask = (id: string) => {
@@ -127,6 +129,7 @@ export function PlanPage() {
             <Tabs
               current={current}
               items={[
+                { value: 'roles', label: 'Роли по спринтам' },
                 { value: 'sprints', label: 'Диаграмма Ганта', count: model?.tasks.size },
                 { value: 'load', label: 'Загрузка команд и ролей' },
                 { value: 'priority', label: 'Приоритеты' },
@@ -136,7 +139,11 @@ export function PlanPage() {
             {!plan.data || !model || tasks.isLoading ? (
               <SkeletonRows rows={8} cols={6} />
             ) : current === 'sprints' ? (
-              <GanttView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={new Set(facts.data?.map((f) => f.sprint_no))} readOnly={readOnly} risks={risks} selectedId={taskId} onSelect={openTask} />
+              <GanttView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={fixedSprints} readOnly={readOnly} risks={risks} selectedId={taskId} onSelect={openTask} />
+            ) : current === 'roles' ? (
+              <RolesView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={fixedSprints} readOnly={readOnly} selectedId={taskId} onSelect={openTask} />
+            ) : current === 'sprints' ? (
+              <GanttView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={fixedSprints} readOnly={readOnly} risks={risks} selectedId={taskId} onSelect={openTask} />
             ) : current === 'load' ? (
               <LoadView model={model} />
             ) : (

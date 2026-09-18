@@ -12,6 +12,13 @@ class Settings(BaseSettings):
         "*",
         validation_alias=AliasChoices("CORS_ORIGINS", "POSTCODE_CORS_ORIGINS"),
     )
+    redis_url: str = "redis://localhost:6379/0"  # arq-воркер (change 007); пусто = только обработка в процессе
+    jobs_mode: str = Field(
+        "auto",  # auto | queue | sync
+        validation_alias=AliasChoices("JOBS_MODE", "POSTCODE_JOBS_MODE"),
+    )
+    jobs_timeout_sec: float = 120.0  # arq job_timeout
+    jobs_max_tries: int = 2
 
     class Config:
         env_prefix = "POSTCODE_"

@@ -5,20 +5,22 @@ from src.main import app
 
 
 @pytest.mark.asyncio
-async def test_workspace_crud_and_isolation():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+async def test_workspace_crud_and_isolation(auths):
+    editor = auths["editor"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
+                           headers=editor) as client:
         # 1. Get workspaces list
         ws_resp = await client.get("/workspaces")
         assert ws_resp.status_code == 200
         assert len(ws_resp.json()) >= 1
 
-        # 2. Create new workspace B
+        # 2. Create new workspace B (creator is admin there)
         create_resp = await client.post("/workspaces", json={"name": "Workspace B"})
         assert create_resp.status_code == 201
         ws_b_id = create_resp.json()["id"]
 
         # 3. Import dataset into default workspace
-        import_default = await client.post("/api/v1/data/import", headers={"X-Workspace-Id": "default"})
+        import_default = await client.post("/api/v1/data/import")
         assert import_default.status_code == 200
         default_count = import_default.json()["counts"]["tasks"]
         assert default_count > 0
@@ -28,7 +30,7 @@ async def test_workspace_crud_and_isolation():
         assert ws_b_tasks.status_code == 200
         assert len(ws_b_tasks.json()) == 0
 
-        # 5. Members management
+        # 5. Members management (creator = admin of B)
         add_mem = await client.post(f"/workspaces/{ws_b_id}/members", json={"user_id": "user_123", "role": "editor"})
         assert add_mem.status_code == 201
         assert add_mem.json()["user_id"] == "user_123"

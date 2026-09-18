@@ -48,7 +48,8 @@ def _date_conv(value) -> date | None:
     return None
 
 
-async def _upsert_task(session: AsyncSession, tid: str, row: dict, order_index: int = 100) -> bool:
+async def _upsert_task(session: AsyncSession, tid: str, row: dict, order_index: int = 100,
+                       workspace_id: str = "default") -> bool:
     existing = (await session.execute(select(TaskORM).where(TaskORM.task_id == tid))).scalar_one_or_none()
     if existing:
         if existing.source == "manual":
@@ -64,6 +65,7 @@ async def _upsert_task(session: AsyncSession, tid: str, row: dict, order_index: 
         return False
     session.add(TaskORM(
         task_id=tid,
+        workspace_id=workspace_id,
         parent_id=str(row.get("parent_id") or "") or None,
         team_id=str(row.get("team_id") or ""),
         summary=str(row.get("summary") or ""),
@@ -77,7 +79,7 @@ async def _upsert_task(session: AsyncSession, tid: str, row: dict, order_index: 
     return True
 
 
-async def stage_import(session: AsyncSession, job) -> dict[str, int]:
+async def stage_import(session: AsyncSession, job, workspace_id: str = "default") -> dict[str, int]:
     counts: dict[str, int] = {}
     tasks = job.rows_by_entity.get("task", [])
     engineers = job.rows_by_entity.get("engineer", [])
@@ -95,7 +97,7 @@ async def stage_import(session: AsyncSession, job) -> dict[str, int]:
         if cur is None or sum(bool(v) for v in row.values()) > sum(bool(v) for v in cur):
             by_task_id[tid] = row
     for i, (tid, row) in enumerate(by_task_id.items()):
-        await _upsert_task(session, tid, row, order_index=i)
+        await _upsert_task(session, tid, row, order_index=i, workspace_id=workspace_id)
     counts["tasks"] = len(by_task_id)
 
     seen_engineer: set[tuple[str, str, str]] = set()
@@ -120,6 +122,7 @@ async def stage_import(session: AsyncSession, job) -> dict[str, int]:
             existing.source = "imported"
         else:
             session.add(EngineerORM(
+                workspace_id=workspace_id,
                 engineer_id=eid, team_id=team, role=role,
                 grade=str(row.get("grade") or ""),
                 skills_declared=str(row.get("skills_declared") or ""),
@@ -147,6 +150,7 @@ async def stage_import(session: AsyncSession, job) -> dict[str, int]:
             existing.source = "imported"
         else:
             session.add(DependencyORM(
+                workspace_id=workspace_id,
                 blocking_task_id=a, blocked_task_id=b,
                 dependency_type=str(row.get("dependency_type") or ""), source="imported",
             ))
@@ -159,6 +163,7 @@ async def stage_import(session: AsyncSession, job) -> dict[str, int]:
         if not team or not snapshot:
             continue
         session.add(TeamHistoryORM(
+            workspace_id=workspace_id,
             team_id=team,
             snapshot_date=snapshot,
             velocity_achieved=_f(row.get("velocity_achieved")),
@@ -176,7 +181,7 @@ async def stage_import(session: AsyncSession, job) -> dict[str, int]:
                 if hours_num <= 0 or not tid:
                     continue
                 session.add(RoleRequirementORM(
-                    task_id=tid, role=str(rr["role"]), hours=hours_num, source="imported"))
+                    workspace_id=workspace_id, task_id=tid, role=str(rr["role"]), hours=hours_num, source="imported"))
                 n_req += 1
             continue
         if isinstance(rr.get("role_hours"), dict) and rr.get("task_id"):
@@ -185,14 +190,14 @@ async def stage_import(session: AsyncSession, job) -> dict[str, int]:
                 if hours_num <= 0:
                     continue
                 session.add(RoleRequirementORM(
-                    task_id=str(rr["task_id"]), role=role, hours=hours_num, source="imported"))
+                    workspace_id=workspace_id, task_id=str(rr["task_id"]), role=role, hours=hours_num, source="imported"))
                 n_req += 1
         elif rr.get("role") is None and rr.get("task_id"):
             hours = _f(str(rr.get("hours") or ""))
             if hours <= 0:
                 continue
             session.add(RoleRequirementORM(
-                task_id=str(rr["task_id"]), role=str(rr.get("role") or ""), hours=hours, source="imported"))
+                workspace_id=workspace_id, task_id=str(rr["task_id"]), role=str(rr.get("role") or ""), hours=hours, source="imported"))
             n_req += 1
     counts["role_requirements"] = n_req
 

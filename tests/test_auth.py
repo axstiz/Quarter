@@ -1,6 +1,8 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+import random
+
 from src.main import app
 
 
@@ -10,25 +12,26 @@ async def test_auth_flow():
         # 1. Register new user
         reg_resp = await client.post(
             "/auth/register",
-            json={"email": "lead@postcode.local", "password": "secure_password", "role": "editor"},
+            json={"email": f"lead{random.randint(1, 10**9)}@example.com", "password": "secure_password", "role": "editor"},
         )
         assert reg_resp.status_code == 201
         data = reg_resp.json()
         assert "access_token" in data
-        assert data["user"]["email"] == "lead@postcode.local"
+        assert data["user"]["email"].endswith("@example.com")
         token = data["access_token"]
 
+        reg_email = data["user"]["email"]
         # 2. Get /auth/me with Bearer token
         me_resp = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert me_resp.status_code == 200
         me_data = me_resp.json()
-        assert me_data["email"] == "lead@postcode.local"
+        assert me_data["email"] == reg_email
         assert me_data["role"] == "editor"
 
         # 3. Login
         login_resp = await client.post(
             "/auth/login",
-            json={"email": "lead@postcode.local", "password": "secure_password"},
+            json={"email": reg_email, "password": "secure_password"},
         )
         assert login_resp.status_code == 200
         assert "access_token" in login_resp.json()

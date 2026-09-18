@@ -6,6 +6,8 @@ from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.context import Context, require_context
+from src.api.permissions import require_permission
 from src.db.models import DependencyORM, EngineerORM, TaskORM, TeamHistoryORM, TeamORM
 from src.db.session import get_session
 
@@ -47,16 +49,18 @@ class TeamIn(BaseModel):
 
 
 @router.post("/engineers", status_code=201)
-async def create_engineer(body: EngineerIn, session: AsyncSession = Depends(get_session)):
+async def create_engineer(body: EngineerIn, ctx: Context = Depends(require_permission("crud_engineers"))):
     eid = body.engineer_id
     if not eid:
         raise HTTPException(status_code=422, detail="engineer_id обязателен")
-    existing = (await session.execute(select(EngineerORM).where(
+    existing = (await ctx.session.execute(select(EngineerORM).where(
+        EngineerORM.workspace_id == ctx.workspace_id,
         EngineerORM.engineer_id == eid, EngineerORM.team_id == body.team_id,
         EngineerORM.role == body.role))).scalars().first()
     if existing:
         raise HTTPException(status_code=409, detail="инженер уже существует")
     eng = EngineerORM(
+        workspace_id=ctx.workspace_id,
         engineer_id=eid,
         team_id=body.team_id or "",
         role=body.role or "",
@@ -65,14 +69,15 @@ async def create_engineer(body: EngineerIn, session: AsyncSession = Depends(get_
         capacity_rate=body.capacity_rate if body.capacity_rate is not None else 1.0,
         source="manual",
     )
-    session.add(eng)
-    await session.commit()
+    ctx.session.add(eng)
+    await ctx.session.commit()
     return {"status": "created", "engineer_id": eid, "source": "manual"}
 
 
 @router.put("/engineers/{engineer_id}")
-async def update_engineer(engineer_id: str, body: EngineerIn, session: AsyncSession = Depends(get_session)):
-    rows = (await session.execute(select(EngineerORM).where(EngineerORM.engineer_id == engineer_id))).scalars().all()
+async def update_engineer(engineer_id: str, body: EngineerIn, ctx: Context = Depends(require_permission("crud_engineers"))):
+    rows = (await ctx.session.execute(select(EngineerORM).where(
+        EngineerORM.engineer_id == engineer_id, EngineerORM.workspace_id == ctx.workspace_id))).scalars().all()
     if not rows:
         raise HTTPException(status_code=404, detail="не найден")
     for eng in rows:
@@ -80,23 +85,26 @@ async def update_engineer(engineer_id: str, body: EngineerIn, session: AsyncSess
             for field in ("team_id", "role", "grade", "skills_declared", "capacity_rate"):
                 if getattr(body, field) is not None:
                     setattr(eng, field, getattr(body, field))
-    await session.commit()
+    await ctx.session.commit()
     return {"status": "updated", "engineer_id": engineer_id}
 
 
 @router.delete("/engineers/{engineer_id}")
-async def delete_engineer(engineer_id: str, session: AsyncSession = Depends(get_session)):
-    await session.execute(delete(EngineerORM).where(EngineerORM.engineer_id == engineer_id))
-    await session.commit()
+async def delete_engineer(engineer_id: str, ctx: Context = Depends(require_permission("crud_engineers"))):
+    await ctx.session.execute(delete(EngineerORM).where(
+        EngineerORM.engineer_id == engineer_id, EngineerORM.workspace_id == ctx.workspace_id))
+    await ctx.session.commit()
     return {"status": "deleted"}
 
 
 @router.post("/tasks", status_code=201)
-async def create_task(body: TaskIn, session: AsyncSession = Depends(get_session)):
-    existing = (await session.execute(select(TaskORM).where(TaskORM.task_id == body.task_id))).scalar_one_or_none()
+async def create_task(body: TaskIn, ctx: Context = Depends(require_permission("crud_tasks"))):
+    existing = (await ctx.session.execute(select(TaskORM).where(
+        TaskORM.task_id == body.task_id, TaskORM.workspace_id == ctx.workspace_id))).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=409, detail="задача уже существует")
     task = TaskORM(
+        workspace_id=ctx.workspace_id,
         task_id=body.task_id,
         parent_id=None,
         team_id=body.team_id or "",
@@ -106,14 +114,15 @@ async def create_task(body: TaskIn, session: AsyncSession = Depends(get_session)
         estimated_hh=body.estimated_hh or 0.0,
         source="manual",
     )
-    session.add(task)
-    await session.commit()
+    ctx.session.add(task)
+    await ctx.session.commit()
     return {"status": "created", "task_id": body.task_id}
 
 
 @router.put("/tasks/{task_id}")
-async def update_task(task_id: str, body: TaskIn, session: AsyncSession = Depends(get_session)):
-    task = (await session.execute(select(TaskORM).where(TaskORM.task_id == task_id))).scalar_one_or_none()
+async def update_task(task_id: str, body: TaskIn, ctx: Context = Depends(require_permission("crud_tasks"))):
+    task = (await ctx.session.execute(select(TaskORM).where(
+        TaskORM.task_id == task_id, TaskORM.workspace_id == ctx.workspace_id))).scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="не найдена")
     for field in ("team_id", "summary", "status", "estimation_sp", "estimated_hh"):
@@ -121,45 +130,49 @@ async def update_task(task_id: str, body: TaskIn, session: AsyncSession = Depend
         if val is not None:
             setattr(task, field, val)
     task.source = "manual"
-    await session.commit()
+    await ctx.session.commit()
     return {"status": "updated", "task_id": task_id}
 
 
 @router.delete("/tasks/{task_id}")
-async def delete_task(task_id: str, session: AsyncSession = Depends(get_session)):
-    await session.execute(delete(TaskORM).where(TaskORM.task_id == task_id))
-    await session.commit()
+async def delete_task(task_id: str, ctx: Context = Depends(require_permission("crud_tasks"))):
+    await ctx.session.execute(delete(TaskORM).where(
+        TaskORM.task_id == task_id, TaskORM.workspace_id == ctx.workspace_id))
+    await ctx.session.commit()
     return {"status": "deleted"}
 
 
 @router.post("/dependencies", status_code=201)
-async def create_dependency(body: DependencyIn, session: AsyncSession = Depends(get_session)):
+async def create_dependency(body: DependencyIn, ctx: Context = Depends(require_permission("crud_tasks"))):
     dep = DependencyORM(
+        workspace_id=ctx.workspace_id,
         blocking_task_id=body.blocking_task_id,
         blocked_task_id=body.blocked_task_id,
         dependency_type=body.dependency_type or "depends on",
         source="manual",
     )
-    session.add(dep)
-    await session.commit()
+    ctx.session.add(dep)
+    await ctx.session.commit()
     return {"status": "created"}
 
 
 @router.post("/teams", status_code=201)
-async def create_team(body: TeamIn, session: AsyncSession = Depends(get_session)):
+async def create_team(body: TeamIn, ctx: Context = Depends(require_permission("crud_engineers"))):
     if not body.team_id:
         raise HTTPException(status_code=422, detail="team_id обязателен")
-    existing = (await session.execute(select(TeamORM).where(TeamORM.team_id == body.team_id))).scalar_one_or_none()
+    existing = (await ctx.session.execute(select(TeamORM).where(
+        TeamORM.team_id == body.team_id, TeamORM.workspace_id == ctx.workspace_id))).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=409, detail="команда уже существует")
-    session.add(TeamORM(team_id=body.team_id, name=body.name or "", source="manual"))
-    await session.commit()
+    ctx.session.add(TeamORM(workspace_id=ctx.workspace_id, team_id=body.team_id, name=body.name or "", source="manual"))
+    await ctx.session.commit()
     return {"status": "created", "team_id": body.team_id}
 
 
 @router.put("/teams/{team_id}")
-async def update_team(team_id: str, body: TeamIn, session: AsyncSession = Depends(get_session)):
-    team = (await session.execute(select(TeamORM).where(TeamORM.team_id == team_id))).scalar_one_or_none()
+async def update_team(team_id: str, body: TeamIn, ctx: Context = Depends(require_permission("crud_engineers"))):
+    team = (await ctx.session.execute(select(TeamORM).where(
+        TeamORM.team_id == team_id, TeamORM.workspace_id == ctx.workspace_id))).scalar_one_or_none()
     if not team:
         raise HTTPException(status_code=404, detail="команда не найдена")
     name = (body.name or "").strip()
@@ -167,24 +180,26 @@ async def update_team(team_id: str, body: TeamIn, session: AsyncSession = Depend
         raise HTTPException(status_code=422, detail="name обязателен для переименования")
     team.name = name
     team.source = "manual"
-    await session.commit()
+    await ctx.session.commit()
     return {"status": "updated", "team_id": team_id, "name": name, "source": "manual"}
 
 
 @router.delete("/teams/{team_id}")
-async def delete_team(team_id: str, session: AsyncSession = Depends(get_session)):
-    await session.execute(delete(TeamORM).where(TeamORM.team_id == team_id))
-    await session.commit()
+async def delete_team(team_id: str, ctx: Context = Depends(require_permission("crud_engineers"))):
+    await ctx.session.execute(delete(TeamORM).where(
+        TeamORM.team_id == team_id, TeamORM.workspace_id == ctx.workspace_id))
+    await ctx.session.commit()
     return {"status": "deleted"}
 
 
 @router.put("/dependencies")
 async def update_dependency(blocking_task_id: str, blocked_task_id: str,
                             body: DependencyTypeIn,
-                            session: AsyncSession = Depends(get_session)):
+                            ctx: Context = Depends(require_permission("crud_tasks"))):
     """Правка типа зависимости по паре задач (решение лида: идентификация по паре,
     не по суррогатному uid). Правка делает запись ручной (source=manual)."""
-    dep = (await session.execute(select(DependencyORM).where(
+    dep = (await ctx.session.execute(select(DependencyORM).where(
+        DependencyORM.workspace_id == ctx.workspace_id,
         DependencyORM.blocking_task_id == blocking_task_id,
         DependencyORM.blocked_task_id == blocked_task_id))).scalar_one_or_none()
     if not dep:
@@ -192,21 +207,23 @@ async def update_dependency(blocking_task_id: str, blocked_task_id: str,
     if body.dependency_type:
         dep.dependency_type = body.dependency_type
     dep.source = "manual"
-    await session.commit()
+    await ctx.session.commit()
     return {"status": "updated", "blocking_task_id": blocking_task_id,
             "blocked_task_id": blocked_task_id, "dependency_type": dep.dependency_type}
 
 
 @router.delete("/dependencies")
 async def delete_dependency(blocking_task_id: str, blocked_task_id: str,
-                            session: AsyncSession = Depends(get_session)):
-    dep = (await session.execute(select(DependencyORM).where(
+                            ctx: Context = Depends(require_permission("crud_tasks"))):
+    dep = (await ctx.session.execute(select(DependencyORM).where(
+        DependencyORM.workspace_id == ctx.workspace_id,
         DependencyORM.blocking_task_id == blocking_task_id,
         DependencyORM.blocked_task_id == blocked_task_id))).scalar_one_or_none()
     if not dep:
         raise HTTPException(status_code=404, detail="зависимость не найдена")
-    await session.execute(delete(DependencyORM).where(
+    await ctx.session.execute(delete(DependencyORM).where(
+        DependencyORM.workspace_id == ctx.workspace_id,
         DependencyORM.blocking_task_id == blocking_task_id,
         DependencyORM.blocked_task_id == blocked_task_id))
-    await session.commit()
+    await ctx.session.commit()
     return {"status": "deleted", "blocking_task_id": blocking_task_id, "blocked_task_id": blocked_task_id}

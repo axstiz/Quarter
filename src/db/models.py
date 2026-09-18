@@ -120,6 +120,7 @@ class PlanORM(Base):
     is_initial: Mapped[bool] = mapped_column(Boolean, default=True)
     recomputed_after_sprint: Mapped[int | None] = mapped_column(Integer, nullable=True)
     parent_plan_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_by: Mapped[str] = mapped_column(String, default="system", index=True)
 
 
 class PlanItemORM(Base):
@@ -144,6 +145,7 @@ class SprintFactORM(Base):
     completed_sp: Mapped[float] = mapped_column(Float)
     completed_task_ids: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
     notes: Mapped[str] = mapped_column(String, default="")
+    author_id: Mapped[str] = mapped_column(String, default="system")
     __table_args__ = (UniqueConstraint("plan_id", "sprint_no", name="uq_fact_per_sprint"),)
 
 
@@ -159,6 +161,10 @@ class UserORM(Base):
 class UploadJobORM(Base):
     __tablename__ = "upload_jobs"
     job_id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
+    stage: Mapped[str] = mapped_column(String, default="")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(String, default="")
     filename: Mapped[str] = mapped_column(String)
     file_path: Mapped[str] = mapped_column(String, default="")
     status: Mapped[str] = mapped_column(String, default="uploaded")
