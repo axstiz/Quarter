@@ -1,0 +1,141 @@
+/* ---------- Каркас: сайдбар | основная область ---------- */
+.app { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 100vh; }
+
+.sidebar {
+  position: sticky; top: 0; height: 100vh;
+  display: flex; flex-direction: column; gap: var(--s-1);
+  padding: var(--s-3) var(--s-2);
+  border-right: 1px solid var(--rule);
+  background: var(--paper);
+}
+.brand { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1) var(--s-2) var(--s-3); }
+.brand__mark { width: 24px; height: 24px; border-radius: var(--r-sm); flex: none; }
+.brand__name { font-weight: 600; letter-spacing: -0.01em; }
+.brand__sub { font-size: var(--text-2xs); color: var(--ink-3); line-height: 1.2; }
+
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav__label { font-size: var(--text-2xs); font-weight: 500; color: var(--ink-4); padding: var(--s-3) var(--s-2) var(--s-1); }
+.nav__item {
+  position: relative; isolation: isolate; display: flex; align-items: center; gap: var(--s-2);
+  height: var(--control-h); padding: 0 var(--s-2); border-radius: var(--r-sm);
+  color: var(--ink-2); font-size: var(--text-sm); font-weight: 500;
+  transition: color var(--d-fast) ease, background-color var(--d-fast) ease;
+}
+.nav__item:hover { text-decoration: none; color: var(--ink); }
+@media (hover: hover) and (pointer: fine) { .nav__item:hover { background: var(--hover); } }
+.nav__item[aria-current='page'] { color: var(--ink); }
+.nav__item svg { width: 16px; height: 16px; flex: none; color: var(--ink-3); }
+.nav__item[aria-current='page'] svg { color: var(--plan); }
+.nav__active { position: absolute; inset: 0; border-radius: var(--r-sm); background: var(--select); z-index: -1; }
+
+.sidebar__footer { margin-top: auto; display: flex; flex-direction: column; gap: 2px; }
+.sidebar__meta { display: flex; align-items: center; justify-content: space-between; padding: var(--s-2) var(--s-2) 0; }
+
+.main { display: flex; flex-direction: column; min-width: 0; }
+
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: var(--s-3);
+  min-height: var(--topbar-h); padding: var(--s-2) var(--s-6);
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(8px);
+  border-bottom: 1px solid var(--rule);
+}
+.topbar__spacer { flex: 1; }
+.topbar .topbar__menu { display: none; }
+
+/* Подпись квартала: 6 спринтов, отмечены загруженные факты */
+.quarter { display: flex; align-items: center; gap: var(--s-2); }
+.quarter__label { font-size: var(--text-xs); color: var(--ink-3); }
+.quarter__track { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(6, 28px); gap: 3px; }
+.quarter__cell {
+  position: relative; height: 26px; padding-bottom: 4px !important; border-radius: var(--r-xs);
+  display: grid; place-items: center;
+  font-size: var(--text-2xs); font-weight: 500; font-variant-numeric: tabular-nums;
+  color: var(--ink-3); background: var(--well); border: 0; padding: 0; cursor: pointer;
+  transition: background-color var(--d-fast) ease, color var(--d-fast) ease, transform var(--d-press) var(--ease-out);
+}
+.quarter__cell:active { transform: scale(0.95); }
+.quarter__cell[data-state='done'] { background: var(--done-soft); color: var(--done); }
+.quarter__cell[data-state='next'] { color: var(--plan-ink); }
+.quarter__cell[data-state='next']::before { content: ''; position: absolute; bottom: 4px; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--plan); }
+.quarter__cell[aria-current='page'] { background: var(--plan); color: var(--on-plan); }
+.quarter__cell[aria-current='page']::before { background: var(--on-plan); }
+@media (hover: hover) and (pointer: fine) { .quarter__cell:hover:not([aria-current='page']) { background: var(--press); } }
+.quarter__cell::after { content: ''; position: absolute; inset: -6px -2px; } /* зона нажатия */
+
+/* ---------- Страница: контент + панель деталей ---------- */
+.page { position: relative; flex: 1; min-width: 0; }
+.content { padding: var(--s-5) var(--s-6) var(--s-10); min-width: 0; transition: padding-right var(--d-panel) var(--ease-drawer); }
+@media (min-width: 1280px) {
+  .page[data-panel='open'] .content { padding-right: calc(var(--panel-w) + var(--s-6)); }
+  /* Пока открыта панель, второстепенные колонки дублируют её — скрываем, чтобы таблица не сжималась */
+  .page[data-panel='open'] .col-optional { display: none; }
+}
+
+.page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-4); }
+.page-head__sub { margin-top: var(--s-1); color: var(--ink-3); font-size: var(--text-sm); }
+.page-head__actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+
+.stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  margin-bottom: var(--s-5); border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--sheet); overflow: hidden;
+}
+.stats > .stat { padding: var(--s-3) var(--s-4); box-shadow: -1px 0 0 var(--rule); }
+.stat { display: flex; flex-direction: column; gap: 2px; min-width: 96px; }
+.stat__label { font-size: var(--text-xs); color: var(--ink-3); }
+.stat__action { align-self: flex-start; margin: 2px 0 0 -8px; }
+.stat__value { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.stat[data-tone='over'] .stat__value { color: var(--over); }
+.stat[data-tone='done'] .stat__value { color: var(--done); }
+.stat[data-tone='shift'] .stat__value { color: var(--shift); }
+
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); margin: var(--s-3) 0; }
+.toolbar__end { margin-left: auto; display: flex; align-items: center; gap: var(--s-2); }
+
+.section { margin-top: var(--s-8); }
+
+/*
+ * Ритм страницы: любые два соседних блока верхнего уровня разделены одинаково,
+ * независимо от того, в каком порядке их собрал компонент. Отступы не задаются вручную в местах использования.
+ */
+.content > :where(.stats, .tabs, .toolbar, .groups, .block, .section, .callout, .alert, .split, .steps, .empty) + :where(.stats, .tabs, .toolbar, .groups, .block, .section, .callout, .alert, .split, .steps, .empty) {
+  margin-top: var(--s-6);
+}
+.content > .tabs + .toolbar, .content > .tabs + .groups, .content > .tabs + .split, .content > .toolbar + .groups { margin-top: var(--s-3); }
+.content > .section + .section { margin-top: var(--s-8); }
+.section__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-2); }
+.section__hint { font-size: var(--text-xs); color: var(--ink-3); }
+
+.split { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: var(--s-6); align-items: start; }
+
+@media (max-width: 1100px) {
+  .split { grid-template-columns: 1fr; }
+}
+
+/* Фильтры: на узком экране сворачиваются, чтобы результаты были на первом экране */
+.filters-box > summary { display: none; }
+@media (max-width: 1100px) {
+  .filters-box > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--text-sm); font-weight: 500; min-height: 40px; }
+  .filters-box:not([open]) > .filters { display: none; }
+}
+
+@media (max-width: 960px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar {
+    position: fixed; z-index: 60; left: 0; width: 264px; background: var(--sheet);
+    box-shadow: var(--shadow-lift); border-right: 0;
+    transform: translateX(-100%); transition: transform var(--d-panel) var(--ease-drawer);
+  }
+  .sidebar[data-open='true'] { transform: none; }
+  .topbar { padding: var(--s-2) var(--s-4); }
+  .topbar .topbar__menu { display: inline-flex; }
+  .content { padding: var(--s-4) var(--s-4) var(--s-10); }
+  .quarter__label { display: none; }
+}
+@media (max-width: 560px) {
+  .quarter__track { grid-template-columns: repeat(6, 22px); }
+}
+
+/* Смена темы через View Transitions: мягкий кроссфейд вместо резкой вспышки */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 200ms; animation-timing-function: ease; }
