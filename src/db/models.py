@@ -170,3 +170,32 @@ class UploadJobORM(Base):
     answers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now())
     updated_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now(), onupdate=func.now())
+
+
+class RoleOverrideORM(Base):
+    __tablename__ = "role_overrides"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
+    role: Mapped[str] = mapped_column(String, index=True)
+    permission: Mapped[str] = mapped_column(String, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class UserOverrideORM(Base):
+    __tablename__ = "user_overrides"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    permission: Mapped[str] = mapped_column(String, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class AuditLogORM(Base):
+    __tablename__ = "audit_logs"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
+    actor_id: Mapped[str] = mapped_column(String)
+    action: Mapped[str] = mapped_column(String)
+    target: Mapped[str] = mapped_column(String, default="")
+    details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now())
