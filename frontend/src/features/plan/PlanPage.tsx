@@ -16,6 +16,7 @@ import { LoadView } from './LoadView'
 import { PriorityView } from './PriorityView'
 import { RiskPanelContent } from './RiskPanel'
 import { GanttView } from './GanttView'
+import { RolesView } from './RolesView'
 import { TaskPanelContent } from './TaskPanel'
 import { Panel } from '@/components/ui/Panel'
 
@@ -35,6 +36,7 @@ export function PlanPage() {
 
   const model = useMemo(() => (plan.data ? buildPlanModel(plan.data, tasks.data ?? []) : null), [plan.data, tasks.data])
   const risks = useMemo(() => (model ? tasksAtRisk(model.tasks.values(), bus.data) : []), [model, bus.data])
+  const fixedSprints = useMemo(() => new Set(facts.data?.map((f) => f.sprint_no)), [facts.data])
   const latestId = versions.data?.at(-1)?.plan_id
   const readOnly = !!planId && !!latestId && planId !== latestId
 
@@ -128,6 +130,7 @@ export function PlanPage() {
               current={current}
               items={[
                 { value: 'sprints', label: 'Диаграмма Ганта', count: model?.tasks.size },
+                { value: 'roles', label: 'Гант по ролям' },
                 { value: 'load', label: 'Загрузка команд и ролей' },
                 { value: 'priority', label: 'Приоритеты' },
               ]}
@@ -136,7 +139,9 @@ export function PlanPage() {
             {!plan.data || !model || tasks.isLoading ? (
               <SkeletonRows rows={8} cols={6} />
             ) : current === 'sprints' ? (
-              <GanttView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={new Set(facts.data?.map((f) => f.sprint_no))} readOnly={readOnly} risks={risks} selectedId={taskId} onSelect={openTask} />
+              <GanttView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={fixedSprints} readOnly={readOnly} risks={risks} selectedId={taskId} onSelect={openTask} />
+            ) : current === 'roles' ? (
+              <RolesView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={fixedSprints} selectedId={taskId} onSelect={openTask} />
             ) : current === 'load' ? (
               <LoadView model={model} />
             ) : (

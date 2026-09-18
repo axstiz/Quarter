@@ -9,6 +9,7 @@ import { useTeamDetails } from '@/api/queries'
 import { fmt, plural, sprintWeeks } from '@/lib/format'
 import { DECISION_LABEL } from '@/lib/labels'
 import { formatSprints, SPRINT_NUMBERS, type PlanModel, type PlanRow, type TaskSummary } from '@/lib/planModel'
+import { cardKey as baseCardKey, loadPlacement, persistPlacement, projectedSprint, type Placement } from '@/lib/ganttOverrides'
 import { useParam } from '@/lib/useParam'
 import type { RiskEntry } from './busRisk'
 
@@ -22,25 +23,11 @@ interface Props {
   onSelect: (taskId: string) => void
 }
 
-type Placement = Record<string, number>
 type TaskOrder = Record<string, string[]>
-const keyFor = (planId: string) => `quarter-gantt-cards:${planId}`
 const orderKeyFor = (planId: string) => `quarter-gantt-order:${planId}`
-const cardKey = (task: TaskSummary, row: PlanRow) => `${task.task_id}:${row.sprint_no}`
+const cardKey = (task: TaskSummary, row: PlanRow) => baseCardKey(task.task_id, row)
 const countLabel = (n: number) => `${n} ${plural(n, 'задача', 'задачи', 'задач')}`
 const fmtSp = (value: number | null) => value !== null && value >= 0 && value < 0.05 ? '<0,1' : fmt(value)
-
-function loadPlacement(planId: string): Placement {
-  try { return JSON.parse(localStorage.getItem(keyFor(planId)) ?? '{}') as Placement }
-  catch { return {} }
-}
-
-function persist(planId: string, value: Placement) {
-  try {
-    if (Object.keys(value).length) localStorage.setItem(keyFor(planId), JSON.stringify(value))
-    else localStorage.removeItem(keyFor(planId))
-  } catch { /* При недоступном хранилище работает состояние вкладки. */ }
-}
 
 function loadOrder(planId: string): TaskOrder {
   try { return JSON.parse(localStorage.getItem(orderKeyFor(planId)) ?? '{}') as TaskOrder }
@@ -99,7 +86,7 @@ export function GanttView({ model, planId, fixedSprints, readOnly, risks, select
   const query = (q ?? '').trim().toLowerCase()
   const filtered = !!(team || decision || query || onlyRisk)
   const tasks = [...model.tasks.values()].filter((task) => task.sprints.length)
-  const projected = (task: TaskSummary, row: PlanRow) => placement[cardKey(task, row)] ?? row.sprint_no!
+  const projected = (task: TaskSummary, row: PlanRow) => projectedSprint(placement, task.task_id, row)
   const occupies = (task: TaskSummary, n: number) => task.rows.some((row) => projected(task, row) === n)
   const matches = (task: TaskSummary) =>
     (!team || task.team_id === team) && (!decision || task.decision === decision) &&
@@ -157,7 +144,7 @@ export function GanttView({ model, planId, fixedSprints, readOnly, risks, select
       if (target === row.sprint_no) delete next[key]
       else next[key] = target
       setPlacement(next)
-      persist(planId, next)
+      persistPlacement(planId, next)
       setMoveId(null)
       setFlight(null)
       setArrived(key)
@@ -165,7 +152,7 @@ export function GanttView({ model, planId, fixedSprints, readOnly, risks, select
       showFeedback(`${task.task_id} · часть ${row.part} теперь в спринте ${target}`)
     }, reducedMotion ? 0 : 360)
   }
-  const reset = () => { setPlacement({}); persist(planId, {}); setFeedback({ text: 'Раскладка сброшена' }); setLastMove(null); setArrived(null) }
+  const reset = () => { setPlacement({}); persistPlacement(planId, {}); setFeedback({ text: 'Раскладка сброшена' }); setLastMove(null); setArrived(null) }
 
   return (
     <>
