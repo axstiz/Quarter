@@ -550,3 +550,29 @@
 .cause__effect > svg { width: 14px; height: 14px; color: var(--ink-4); }
 .cause__move { color: var(--shift); font-size: var(--text-xs); font-weight: 500; }
 .cause__out { color: var(--over); font-size: var(--text-xs); font-weight: 600; }
+
+/* ---------- Метрики: план/факт по спринтам ---------- */
+.norm { font-size: var(--text-xs); font-weight: 600; white-space: nowrap; }
+.norm[data-state='ok'] { color: var(--done); }
+.norm[data-state='low'] { color: var(--over); }
+.norm[data-state='high'] { color: var(--shift); }
+.sdchart { margin: 0; padding: var(--s-4); }
+.sdchart__legend { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-5); margin-bottom: var(--s-3); font-size: var(--text-xs); color: var(--ink-2); }
+.sdchart__legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sdchart__key { width: 12px; height: 12px; border-radius: 3px; background: var(--plan-soft); box-shadow: inset 0 0 0 1.5px var(--plan); }
+.sdchart__key[data-fill='true'] { background: var(--plan); }
+.sdchart__plot { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--s-2); border-bottom: 1px solid var(--rule-strong); }
+.sdchart__col { position: relative; display: grid; grid-template-rows: auto 180px; align-items: end; padding: 0 var(--s-2); border-radius: var(--r-sm); outline: none; }
+.sdchart__col:focus-visible { box-shadow: var(--focus-ring); }
+.sdchart__value { display: flex; flex-direction: column; align-items: center; min-height: 36px; justify-content: flex-end; font-size: var(--text-xs); line-height: 1.3; }
+.sdchart__value b { font-size: var(--text-sm); color: var(--ink); }
+.sdchart__area { position: relative; height: 180px; }
+.sdchart__planned, .sdchart__done { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); border-radius: 4px 4px 0 0; transition: height 320ms var(--ease-out); }
+.sdchart__planned { width: min(56px, 70%); background: var(--plan-soft); box-shadow: inset 0 0 0 1.5px var(--plan); }
+.sdchart__done { width: calc(min(56px, 70%) - 10px); background: var(--plan); }
+.sdchart__col[data-forecast='true'] .sdchart__planned { background: repeating-linear-gradient(135deg, var(--plan-soft) 0 4px, transparent 4px 8px); }
+.sdchart__x { grid-row: 3; display: flex; flex-direction: column; align-items: center; padding-top: var(--s-2); font-size: var(--text-xs); color: var(--ink-3); }
+.sdchart__x b { color: var(--ink-2); font-weight: 500; }
+.sdchart__tip { position: absolute; z-index: 5; left: 50%; bottom: calc(100% - 28px); width: max-content; max-width: 220px; padding: 6px var(--s-2); border-radius: var(--r-sm); background: var(--sheet); box-shadow: var(--shadow-lift); font-size: var(--text-xs); color: var(--ink-2); opacity: 0; pointer-events: none; transform: translate(-50%, 4px); transition: opacity var(--d-fast) ease, transform var(--d-fast) var(--ease-out); }
+.sdchart__col:hover .sdchart__tip, .sdchart__col:focus-visible .sdchart__tip { opacity: 1; transform: translate(-50%, 0); }
+@media (hover: hover) and (pointer: fine) { .sdchart__col:hover { background: var(--hover); } }

@@ -65,10 +65,10 @@ export function MetricsPage() {
       ) : (
         <>
           <div className="block" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-            <Kpi label="Выполнение квартального плана" hint="завершённые инициативы / инициативы первоначального плана" forecast={m.quarter_completion_is_forecast}>
+            <Kpi label="Выполнение квартального плана" hint="завершённые инициативы / инициативы первоначального плана" forecast={m.quarter_completion_is_forecast} norm={[80, 100]} value={m.quarter_completion_pct}>
               <AnimatedNumber value={m.quarter_completion_pct} suffix="%" />
             </Kpi>
-            <Kpi label="Среднее выполнение спринта" hint="факт SP / первоначально запланированные SP" forecast={false} border>
+            <Kpi label="Среднее выполнение спринта (Say/Do)" hint="факт SP / первоначально запланированные SP" forecast={false} border norm={[90, 105]} value={avg}>
               {avg == null ? '—' : <AnimatedNumber value={Math.round(avg * 10) / 10} suffix="%" />}
             </Kpi>
             <Kpi label="Спринтов с фактом" hint="остальные значения — прогноз" forecast={false} border>
@@ -80,9 +80,18 @@ export function MetricsPage() {
           <section className="section">
             <div className="section__head">
               <h2>Выполнение по спринтам</h2>
-              <span className="section__hint">знаменатель — SP первоначального плана</span>
+              <span className="section__hint">знаменатель — SP первоначального плана · норма Say/Do 90–105%</span>
             </div>
-            <div className="block scroll-x">
+            <SprintChart
+              data={SPRINTS.map((n) => ({
+                n,
+                planned: plannedSp(n) ?? 0,
+                done: m.sprint_completion_is_forecast[n] ? null : (fact(n)?.completed_sp ?? 0),
+                pct: m.sprint_completion_pct[n],
+                forecast: m.sprint_completion_is_forecast[n],
+              }))}
+            />
+            <div className="block scroll-x" style={{ marginTop: 'var(--s-3)' }}>
               <table className="table">
                 <thead>
                   <tr>
@@ -148,15 +157,62 @@ export function MetricsPage() {
   )
 }
 
-function Kpi({ label, hint, forecast, border, children }: { label: string; hint: string; forecast: boolean; border?: boolean; children: React.ReactNode }) {
+function Kpi({ label, hint, forecast, border, norm, value, children }: { label: string; hint: string; forecast: boolean; border?: boolean; norm?: [number, number]; value?: number | null; children: React.ReactNode }) {
   return (
     <div style={{ padding: 'var(--s-4)', borderLeft: border ? '1px solid var(--rule)' : undefined }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
         <span className="stat__label">{label}</span>
         {forecast && <Badge tone="shift">прогноз</Badge>}
       </div>
-      <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 600, letterSpacing: '-0.02em', marginTop: 4 }}>{children}</div>
-      <div className="section__hint">{hint}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 4 }}>
+        <span style={{ fontSize: 'var(--text-3xl)', fontWeight: 600, letterSpacing: '-0.02em' }}>{children}</span>
+        {norm && value != null && <NormStatus value={value} norm={norm} />}
+      </div>
+      <div className="section__hint">{hint}{norm && ` · бизнес-норма ${norm[0]}–${norm[1]}%`}</div>
     </div>
+  )
+}
+
+/** Статус относительно бизнес-нормы онбординга — текстом и значком, не только цветом. */
+function NormStatus({ value, norm }: { value: number; norm: [number, number] }) {
+  const state = value < norm[0] ? 'low' : value > norm[1] ? 'high' : 'ok'
+  const text = state === 'ok' ? '✓ в норме' : state === 'low' ? '↓ ниже нормы' : '↑ выше нормы'
+  return <span className="norm" data-state={state}>{text}</span>
+}
+
+interface SprintPoint { n: number; planned: number; done: number | null; pct: number | null; forecast: boolean }
+
+/**
+ * План и факт по спринтам в одном столбике: контур — SP первоначального плана, заливка — выполнено по факту.
+ * Прогнозные спринты — только контур с подписью «прогноз». Точные числа — в таблице ниже.
+ */
+function SprintChart({ data }: { data: SprintPoint[] }) {
+  const max = Math.max(1, ...data.map((d) => Math.max(d.planned, d.done ?? 0)))
+  const h = (v: number) => `${(v / max) * 100}%`
+  return (
+    <figure className="sdchart block">
+      <figcaption className="sdchart__legend">
+        <span><i className="sdchart__key" /> запланировано (первоначальный план)</span>
+        <span><i className="sdchart__key" data-fill="true" /> выполнено по факту</span>
+      </figcaption>
+      <div className="sdchart__plot">
+        {data.map((d) => {
+          const label = `Спринт ${d.n}: запланировано ${fmt(d.planned)} SP${d.forecast ? ', факт ещё не загружен (прогноз)' : `, выполнено ${fmt(d.done)} SP — ${pct(d.pct)}`}`
+          return (
+            <div key={d.n} className="sdchart__col" tabIndex={0} aria-label={label} data-forecast={d.forecast || undefined}>
+              <div className="sdchart__value">
+                {d.forecast ? <span className="muted">прогноз</span> : <><b className="tabular">{pct(d.pct)}</b>{d.pct != null && <NormStatus value={d.pct} norm={[90, 105]} />}</>}
+              </div>
+              <div className="sdchart__area">
+                <span className="sdchart__planned" style={{ height: h(d.planned) }} />
+                {d.done != null && d.done > 0 && <span className="sdchart__done" style={{ height: h(d.done) }} />}
+              </div>
+              <div className="sdchart__x"><b>Спринт {d.n}</b><span className="tabular">{fmt(d.planned)} SP</span></div>
+              <div className="sdchart__tip" role="tooltip">{label}</div>
+            </div>
+          )
+        })}
+      </div>
+    </figure>
   )
 }
