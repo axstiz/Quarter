@@ -25,6 +25,8 @@ import type {
 
 export const api = {
   // Стр. 0.1 — загрузка данных
+  /** Путь А: встроенный датасет организаторов одной кнопкой, без сопоставления колонок */
+  importDemo: () => request<{ status: string; counts: Record<string, number> }>('POST', '/data/import'),
   uploadFile: (file: File) => {
     const form = new FormData()
     form.append('file', file)

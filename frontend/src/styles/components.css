@@ -576,3 +576,9 @@
 .sdchart__tip { position: absolute; z-index: 5; left: 50%; bottom: calc(100% - 28px); width: max-content; max-width: 220px; padding: 6px var(--s-2); border-radius: var(--r-sm); background: var(--sheet); box-shadow: var(--shadow-lift); font-size: var(--text-xs); color: var(--ink-2); opacity: 0; pointer-events: none; transform: translate(-50%, 4px); transition: opacity var(--d-fast) ease, transform var(--d-fast) var(--ease-out); }
 .sdchart__col:hover .sdchart__tip, .sdchart__col:focus-visible .sdchart__tip { opacity: 1; transform: translate(-50%, 0); }
 @media (hover: hover) and (pointer: fine) { .sdchart__col:hover { background: var(--hover); } }
+
+/* ---------- Загрузка: демо-датасет ---------- */
+.demo-import { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-3); padding: var(--s-4); }
+.demo-import p { margin-top: 2px; font-size: var(--text-sm); }
+.or-divider { display: flex; align-items: center; gap: var(--s-3); color: var(--ink-3); font-size: var(--text-xs); }
+.or-divider::before, .or-divider::after { content: ''; flex: 1; height: 1px; background: var(--rule); }
