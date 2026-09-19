@@ -578,11 +578,37 @@ async def plan_bus_risk_endpoint(plan_id: str, session: AsyncSession = Depends(g
 
 
 @router.get("/bus-factor")
-async def bus_factor(session: AsyncSession = Depends(get_session)) -> dict:
+async def bus_factor(
+    scope_type: str | None = None,
+    scope_id: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
     tasks, engineers, history, deps = await load_world(session)
+    known_teams = {e.team_id for e in engineers} | {t.team_id for t in tasks.values() if t.team_id}
+
+    if scope_type:
+        st = scope_type.lower()
+        if st not in ("company", "team"):
+            raise HTTPException(status_code=404, detail=f"неизвестный scope_type: {scope_type}")
+        if st == "team" and scope_id and scope_id not in known_teams:
+            raise HTTPException(status_code=404, detail=f"команда {scope_id} не найдена")
+
     from src.services.bus_factor import compute_bus_factor
 
-    report = compute_bus_factor(engineers)
+    report = compute_bus_factor(engineers, scope_type=scope_type, scope_id=scope_id)
+    return report.model_dump()
+
+
+@router.get("/teams/{team_id}/bus-factor")
+async def team_bus_factor(team_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+    tasks, engineers, history, deps = await load_world(session)
+    known_teams = {e.team_id for e in engineers} | {t.team_id for t in tasks.values() if t.team_id}
+    if team_id not in known_teams:
+        raise HTTPException(status_code=404, detail=f"команда {team_id} не найдена")
+
+    from src.services.bus_factor import compute_bus_factor
+
+    report = compute_bus_factor(engineers, scope_type="team", scope_id=team_id)
     return report.model_dump()
 
 
