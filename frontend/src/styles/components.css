@@ -496,3 +496,10 @@
   .starmap__legend { max-width: 190px; }
 }
 .lg--bridge { width: 14px; height: 0; border-radius: 0; border-top: 1.5px dashed var(--ink-4); }
+
+/* ---------- Методика Bus Factor у таблицы ---------- */
+.bf-method { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--s-2); padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--rule); font-size: var(--text-xs); color: var(--ink-2); line-height: 1.5; }
+.bf-method > svg { width: 14px; height: 14px; margin-top: 2px; color: var(--plan-ink); }
+.bf-method b { color: var(--ink); font-weight: 600; }
+.bf-method summary { display: inline-block; margin-top: 2px; color: var(--plan-ink); cursor: pointer; }
+.bf-method details p { margin-top: var(--s-1); max-width: 90ch; }
