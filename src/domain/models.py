@@ -94,8 +94,12 @@ class Warning(BaseModel):
 class MetricsReport(BaseModel):
     quarter_completion_pct: float | None
     quarter_completion_is_forecast: bool
+    quarter_target_band: list[float] = [80.0, 100.0]
+    quarter_within_norm: bool | None = None
     sprint_completion_pct: dict[int, float | None]
     sprint_completion_is_forecast: dict[int, bool]
+    sprint_target_band: list[float] = [90.0, 105.0]
+    sprint_within_norm: dict[int, bool | None] = {}
 
 
 class BusFactorItem(BaseModel):
