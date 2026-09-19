@@ -4,6 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } fro
 import type { BusFactorReport, Engineer } from '@/api/types'
 import { Button } from '@/components/ui/Button'
 import { Checkbox, Select } from '@/components/ui/Field'
+import { Segmented } from '@/components/ui/Segmented'
 import { t } from '@/lib/motion'
 import { useParam } from '@/lib/useParam'
 import { buildStarGraph, personId, type StarGraph } from './model'
@@ -99,7 +100,7 @@ export function StarMap({ engineers, busFactor, roleDemand }: Props) {
   return (
     <div className="starmap">
       <div className="toolbar starmap__toolbar">
-        <Segmented value={lens} onChange={(v) => setLens(v === 'roles' ? null : v)} items={LENSES} />
+        <Segmented label="Что показать на карте" value={lens} onChange={(v) => setLens(v === 'roles' ? null : v)} items={LENSES} />
         <NodeSearch graph={graph} onChoose={choose} />
         <Select aria-label="Фокус на команде" size="sm" value={focusTeam ?? ''} onChange={(e) => changeTeam(e.target.value)} options={[{ value: '', label: 'Все команды' }, ...teams.map((x) => ({ value: x, label: `Команда ${x}` }))]} />
         {lens !== 'teams' && (
@@ -116,22 +117,8 @@ export function StarMap({ engineers, busFactor, roleDemand }: Props) {
           <Button size="sm" iconOnly icon={<Maximize2 aria-hidden />} aria-label="Показать всю карту" title="Показать всю карту" onClick={() => { changeTeam(''); mapRef.current?.fit() }} />
         </div>
 
-        <Legend lens={lens} defaultOpen={wide} />
+        <Legend lens={lens} defaultOpen={false} />
       </div>
-    </div>
-  )
-}
-
-function Segmented<T extends string>({ value, onChange, items }: { value: T; onChange: (v: T) => void; items: { value: T; label: string; hint: string }[] }) {
-  const id = useId()
-  return (
-    <div className="segmented" role="radiogroup" aria-label="Что показать на карте">
-      {items.map((it) => (
-        <button key={it.value} type="button" role="radio" aria-checked={it.value === value} title={it.hint} className="segmented__item" onClick={() => onChange(it.value)}>
-          {it.value === value && <motion.span layoutId={`seg-${id}`} className="segmented__thumb" transition={t.layout} />}
-          <span className="segmented__label">{it.label}</span>
-        </button>
-      ))}
     </div>
   )
 }
