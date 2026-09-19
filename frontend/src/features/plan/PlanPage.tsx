@@ -9,7 +9,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Empty, ErrorAlert, errorHint, errorTitle, SkeletonRows } from '@/components/ui/States'
 import { Tabs } from '@/components/ui/Tabs'
 import { versionLabel } from '@/lib/labels'
-import { buildPlanModel } from '@/lib/planModel'
+import { buildPlanModel, isPartial } from '@/lib/planModel'
 import { useParam } from '@/lib/useParam'
 import { tasksAtRisk } from './busRisk'
 import { LoadView } from './LoadView'
@@ -37,6 +37,7 @@ export function PlanPage() {
   const model = useMemo(() => (plan.data ? buildPlanModel(plan.data, tasks.data ?? []) : null), [plan.data, tasks.data])
   const risks = useMemo(() => (model ? tasksAtRisk(model.tasks.values(), bus.data) : []), [model, bus.data])
   const fixedSprints = useMemo(() => new Set(facts.data?.map((f) => f.sprint_no)), [facts.data])
+  const factSprintOf = useMemo(() => new Map(facts.data?.flatMap((f) => f.completed_task_ids.map((id) => [id, f.sprint_no] as const))), [facts.data])
   const latestId = versions.data?.at(-1)?.plan_id
   const readOnly = !!planId && !!latestId && planId !== latestId
 
@@ -78,8 +79,9 @@ export function PlanPage() {
   const inPlan = summaries.filter((t) => t.sprints.length && t.decision !== 'done_actual')
   const doneCount = summaries.filter((t) => t.decision === 'done_actual').length
   const outsideCount = model?.outside.filter((t) => t.decision !== 'cancelled').length ?? 0
+  const partialCount = inPlan.filter(isPartial).length
   const spLeft = inPlan.reduce((a, t) => a + t.plannedSp, 0)
-  const current = view ?? 'roles'
+  const current = view ?? 'sprints'
   const panelKey = taskId ? `task:${taskId}` : riskPanel === '1' ? 'risks' : null
 
   const openTask = (id: string) => {
@@ -114,8 +116,13 @@ export function PlanPage() {
               <Stat label="Задач в плане" value={model ? inPlan.length : null} />
               <Stat label="Story Points к выполнению" value={model ? Math.round(spLeft * 10) / 10 : null} />
               <Stat label="Выполнено по факту" value={model ? doneCount : null} tone={doneCount ? 'done' : undefined} />
-              <Stat label="Не помещаются в квартал" value={model ? outsideCount : null} tone={outsideCount ? 'over' : undefined} />
-              <div className="stat" data-tone={risks.length ? 'over' : undefined}>
+              <Stat
+                label="Не помещаются целиком"
+                value={model ? outsideCount + partialCount : null}
+                tone={outsideCount + partialCount ? 'shift' : undefined}
+                hint={model ? `${outsideCount} вне квартала · ${partialCount} частично` : undefined}
+              />
+              <div className="stat">
                 <span className="stat__label">Зависят от одного носителя</span>
                 <span className="stat__value">{plan.data && bus.data ? <AnimatedNumber value={risks.length} /> : <span className="skeleton" style={{ display: 'inline-block', width: 40, height: 20 }} />}</span>
                 {risks.length > 0 && (
@@ -129,8 +136,8 @@ export function PlanPage() {
             <Tabs
               current={current}
               items={[
+                { value: 'sprints', label: 'Диаграмма Ганта' },
                 { value: 'roles', label: 'Роли по спринтам' },
-                { value: 'sprints', label: 'Диаграмма Ганта', count: model?.tasks.size },
                 { value: 'load', label: 'Загрузка команд и ролей' },
                 { value: 'priority', label: 'Приоритеты' },
               ]}
@@ -139,11 +146,9 @@ export function PlanPage() {
             {!plan.data || !model || tasks.isLoading ? (
               <SkeletonRows rows={8} cols={6} />
             ) : current === 'sprints' ? (
-              <GanttView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={fixedSprints} readOnly={readOnly} risks={risks} selectedId={taskId} onSelect={openTask} />
+              <GanttView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} risks={risks} factSprintOf={factSprintOf} selectedId={taskId} onSelect={openTask} />
             ) : current === 'roles' ? (
               <RolesView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={fixedSprints} readOnly={readOnly} selectedId={taskId} onSelect={openTask} />
-            ) : current === 'sprints' ? (
-              <GanttView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={fixedSprints} readOnly={readOnly} risks={risks} selectedId={taskId} onSelect={openTask} />
             ) : current === 'load' ? (
               <LoadView model={model} />
             ) : (
@@ -176,13 +181,14 @@ export function PlanPage() {
   )
 }
 
-function Stat({ label, value, tone }: { label: string; value: number | null; tone?: 'over' | 'shift' | 'done' }) {
+function Stat({ label, value, tone, hint }: { label: string; value: number | null; tone?: 'over' | 'shift' | 'done'; hint?: string }) {
   return (
     <div className="stat" data-tone={tone}>
       <span className="stat__label">{label}</span>
       <span className="stat__value">
         {value == null ? <span className="skeleton" style={{ display: 'inline-block', width: 40, height: 20 }} /> : <AnimatedNumber value={value} />}
       </span>
+      {hint && <span className="stat__hint">{hint}</span>}
     </div>
   )
 }
