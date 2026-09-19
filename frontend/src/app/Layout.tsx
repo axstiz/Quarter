@@ -18,10 +18,22 @@ const NAV = [
   { to: '/metrics', label: 'Метрики', icon: BarChart3 },
 ]
 
+const TITLES: Record<string, string> = {
+  '/plan': 'План квартала',
+  '/sprint': 'Факт спринта',
+  '/team-map': 'Звёздная карта',
+  '/metrics': 'Метрики',
+  '/import': 'Загрузка данных',
+}
+
 export function Layout() {
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
   useEffect(() => setMenuOpen(false), [location.pathname])
+  // Разные вкладки браузера с разными разделами различимы по заголовку
+  useEffect(() => {
+    document.title = `${TITLES[location.pathname] ?? 'Квартал'} — Квартал`
+  }, [location.pathname])
 
   return (
     <div className="app">

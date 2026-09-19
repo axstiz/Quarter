@@ -35,8 +35,8 @@
 
 .input, .select__control, .textarea {
   width: 100%; height: var(--control-h); padding: 0 var(--s-3);
-  border: 0; border-radius: var(--r-sm); background: var(--well);
-  box-shadow: inset 0 0 0 1px var(--rule);
+  border: 0; border-radius: var(--r-sm); background: var(--sheet);
+  box-shadow: inset 0 0 0 1px var(--rule-strong);
   font-size: var(--text-sm); color: var(--ink);
   transition: box-shadow var(--d-fast) ease, background-color var(--d-fast) ease;
 }
@@ -330,7 +330,7 @@
 .panel__body { flex: 1; overflow-y: auto; padding: var(--s-4) var(--s-5) var(--s-8); scrollbar-width: thin; }
 .panel__body > * + * { margin-top: var(--s-5); }
 .panel-scrim { position: fixed; inset: 0; z-index: 39; background: rgba(10, 11, 14, 0.32); }
-@media (min-width: 1280px) { .panel-scrim { display: none; } .panel { box-shadow: none; } }
+@media (min-width: 1280px) { .panel-scrim { display: none; } .panel { box-shadow: none; } .panel.panel--overlay { box-shadow: var(--shadow-lift); } }
 @media (max-width: 1279px) { .panel { box-shadow: var(--shadow-lift); } }
 
 .fields { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: var(--s-2) var(--s-3); margin: 0; font-size: var(--text-sm); }

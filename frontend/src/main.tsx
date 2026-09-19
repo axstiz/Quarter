@@ -24,7 +24,7 @@ createRoot(document.getElementById('root')!).render(
       {/* reducedMotion="user": при prefers-reduced-motion Motion отключает перемещения, оставляя прозрачность */}
       <MotionConfig reducedMotion="user">
         <RouterProvider router={router} />
-        <Toaster position="bottom-right" closeButton duration={4500} gap={8} />
+        <Toaster position="top-center" offset={60} closeButton duration={4500} gap={8} />
       </MotionConfig>
     </QueryClientProvider>
   </StrictMode>,

@@ -83,6 +83,8 @@ export function PlanPage() {
   const spLeft = inPlan.reduce((a, t) => a + t.plannedSp, 0)
   const current = view ?? 'sprints'
   const panelKey = taskId ? `task:${taskId}` : riskPanel === '1' ? 'risks' : null
+  // Сетки спринтов при сжатии теряют читаемость (ключи обрезаются) — на них панель ложится поверх
+  const overlay = current === 'sprints' || current === 'roles'
 
   const openTask = (id: string) => {
     setRiskPanel(null)
@@ -94,7 +96,7 @@ export function PlanPage() {
   }
 
   return (
-    <div className="page" data-panel={panelKey ? 'open' : 'closed'}>
+    <div className="page" data-panel={panelKey && !overlay ? 'open' : 'closed'}>
       <div className="content">
         <div className="page-head">
           <div>
@@ -159,6 +161,7 @@ export function PlanPage() {
       </div>
 
       <Panel
+        overlay={overlay}
         contentKey={plan.data ? panelKey : null}
         onClose={closePanel}
         eyebrow={taskId ?? 'Bus Factor'}
