@@ -44,3 +44,23 @@ async def test_auth_unauthorized():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/auth/me")
         assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_invalid_email_and_admin_escalation():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # Invalid email format (e.g. exampletest.ru)
+        bad_email = await client.post(
+            "/auth/register",
+            json={"email": "exampletest.ru", "password": "secure_password"},
+        )
+        assert bad_email.status_code == 422
+
+        # Registration requesting 'admin' role should be constrained to 'editor'
+        admin_req = await client.post(
+            "/auth/register",
+            json={"email": "hacker@domain.com", "password": "secure_password_123", "role": "admin"},
+        )
+        assert admin_req.status_code == 201
+        assert admin_req.json()["user"]["role"] == "editor"
+

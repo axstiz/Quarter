@@ -1,7 +1,7 @@
-from __future__ import annotations
-
+import re
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,12 +10,30 @@ from src.db.models import UserORM
 from src.db.session import get_session
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
+security_scheme = HTTPBearer(auto_error=False)
+
+EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 
 
 class RegisterRequest(BaseModel):
     email: str
     password: str
     role: str = "editor"
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v_clean = v.strip().lower()
+        if not EMAIL_REGEX.match(v_clean):
+            raise ValueError("Некорректный формат email. Пример: user@domain.com")
+        return v_clean
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Пароль должен состоять минимум из 8 символов")
+        return v
 
 
 class LoginRequest(BaseModel):
@@ -28,14 +46,18 @@ class DemoLoginRequest(BaseModel):
 
 
 async def get_current_user_optional(
+    auth_credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
     authorization: str | None = Header(None),
     session: AsyncSession = Depends(get_session),
 ) -> UserORM | None:
-    if not authorization:
+    token = None
+    if auth_credentials:
+        token = auth_credentials.credentials
+    elif authorization:
+        token = authorization[7:].strip() if authorization.startswith("Bearer ") else authorization.strip()
+
+    if not token:
         return None
-    token = authorization
-    if authorization.startswith("Bearer "):
-        token = authorization[7:].strip()
 
     payload = decode_access_token(token)
     if not payload:
@@ -63,16 +85,14 @@ async def get_current_user(
 
 @auth_router.post("/register", status_code=201)
 async def register(body: RegisterRequest, session: AsyncSession = Depends(get_session)) -> dict:
-    if len(body.password) < 6:
-        raise HTTPException(status_code=422, detail="Пароль должен состоять минимум из 6 символов")
-
-    existing = (await session.execute(select(UserORM).where(UserORM.email == body.email.lower()))).scalar_one_or_none()
+    existing = (await session.execute(select(UserORM).where(UserORM.email == body.email))).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=409, detail="Пользователь с таким email уже существует")
 
-    role = body.role if body.role in ("admin", "editor", "reader") else "editor"
+    # Предотвращение самоназначения роли admin при открытой регистрации
+    role = body.role.lower() if body.role.lower() in ("editor", "reader") else "editor"
     user = UserORM(
-        email=body.email.lower(),
+        email=body.email,
         password_hash=hash_password(body.password),
         role=role,
     )
