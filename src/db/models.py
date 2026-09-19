@@ -128,3 +128,21 @@ class UserORM(Base):
     role: Mapped[str] = mapped_column(String, default="editor")
     created_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now())
 
+
+class ReferenceValueORM(Base):
+    __tablename__ = "reference_values"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
+    category: Mapped[str] = mapped_column(String, index=True)
+    value: Mapped[str] = mapped_column(String)
+    source: Mapped[str] = mapped_column(String, default="imported")
+
+
+class TaskRoleHoursORM(Base):
+    __tablename__ = "task_role_hours"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
+    task_id: Mapped[str] = mapped_column(String, index=True)
+    role: Mapped[str] = mapped_column(String)
+    hours: Mapped[float] = mapped_column(Float, default=0.0)
+    source: Mapped[str] = mapped_column(String, default="imported")
+
+
