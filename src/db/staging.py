@@ -163,7 +163,6 @@ async def stage_import(session: AsyncSession, job) -> dict[str, int]:
             snapshot_date=snapshot,
             velocity_achieved=_f(row.get("velocity_achieved")),
             planned_sp=_f(row.get("planned_sp")),
-            source="imported",
         ))
         history_rows += 1
     counts["team_history"] = history_rows

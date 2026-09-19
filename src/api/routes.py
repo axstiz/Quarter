@@ -36,12 +36,14 @@ from src.domain.models import (
     Task,
     TeamHistory,
 )
+from src.core.calendar import calculate_quarter_start, get_sprint_dates
 from src.services.capacity import team_capacity_sp
 from src.services.planner import PlannerInput, generate_plan
 from src.services.replanner import (
     WARN_COMPOSITION_CHANGE,
     WARN_DEADLINE_OVERFLOW,
     WARN_DEPENDENCY_SHIFT,
+    WARN_GRADE_DEFICIT,
     WARN_ROLE_DEFICIT,
     compute_warnings,
 )
@@ -69,6 +71,10 @@ async def load_world(session) -> tuple[dict[str, Task], list, list, dict]:
             estimation_sp=r.estimation_sp,
             estimated_hh=r.estimated_hh,
             role_hours={},
+            planned_start=r.planned_start,
+            planned_end=r.planned_end,
+            actual_start=r.actual_start,
+            actual_end=r.actual_end,
         )
     for r in role_reqs:
         if r.task_id in tasks:
@@ -130,7 +136,8 @@ async def generate_plan_endpoint(session: AsyncSession = Depends(get_session)) -
     if not tasks:
         raise HTTPException(status_code=400, detail="нет данных в базе; сначала POST /api/v1/data/import")
     plan = generate_plan(PlannerInput(list(tasks.values()), engineers, history, deps))
-    plan_orm = PlanORM(is_initial=True)
+    q_start = calculate_quarter_start(list(tasks.values()))
+    plan_orm = PlanORM(is_initial=True, quarter_start=q_start, sprint_length_days=14)
     session.add(plan_orm)
     await session.flush()
     for sprint in plan.sprints:
@@ -166,9 +173,27 @@ async def get_plan(plan_id: str, session: AsyncSession = Depends(get_session)) -
     items = await get_plan_items(session, plan_id)
     plan = _plan_from_orm(plan_id, items)
     tasks, engineers, history, deps = await load_world(session)
+    
+    q_start = plan_orm.quarter_start or calculate_quarter_start(list(tasks.values()))
+    s_length = plan_orm.sprint_length_days or 14
+    sprint_dates_map = get_sprint_dates(q_start, s_length)
+
+    task_sprints: dict[str, list[int]] = defaultdict(list)
+    for s in plan.sprints:
+        for item in s.items:
+            task_sprints[item.task_id].append(s.sprint_no)
+
     def _with_task(i) -> dict:
         task = tasks.get(i.task_id)
         base = i.model_dump()
+        s_list = task_sprints.get(i.task_id, [])
+        forecast = None
+        if s_list:
+            min_s, max_s = min(s_list), max(s_list)
+            forecast = {
+                "start": sprint_dates_map[str(min_s)]["start"],
+                "end": sprint_dates_map[str(max_s)]["end"],
+            }
         base.update({
             "task_id": i.task_id,
             "summary": task.summary if task else "",
@@ -178,6 +203,7 @@ async def get_plan(plan_id: str, session: AsyncSession = Depends(get_session)) -
             "planned_in_sprint": (task.status != "Done") if task else False,
             "team_id": task.team_id if task else "",
             "role_hours": task.role_hours if task else {},
+            "date_forecast": forecast,
         })
         return base
     return {
@@ -185,6 +211,8 @@ async def get_plan(plan_id: str, session: AsyncSession = Depends(get_session)) -
         "parent_plan_id": plan_orm.parent_plan_id,
         "is_initial": plan_orm.is_initial,
         "recomputed_after_sprint": plan_orm.recomputed_after_sprint,
+        "quarter_start": q_start.isoformat(),
+        "sprint_dates": sprint_dates_map,
         "sprints": [{"sprint_no": s.sprint_no,
                      "tasks": [_with_task(i) for i in s.items]}
                     for s in plan.sprints],
@@ -298,6 +326,7 @@ async def load_facts(plan_id: str, sprint_no: int, body: dict, session: AsyncSes
         sprint_no=sprint_no,
         completed_sp=float(body.get("completed_sp", 0.0)),
         completed_task_ids=body.get("completed_task_ids", []),
+        role_hours_fact=body.get("role_hours_fact", {}),
         notes=body.get("notes", ""),
     )
     session.add(fact)
@@ -316,6 +345,10 @@ async def _recompute_plan_version(session, plan_id: str, after_sprint: int):
     перераспределяется planner'ом (SP/color/роли, заём, разбитие).
     Возвращает новую PlanORM с parent-ссылкой; отдаёт child plan_id."""
     tasks, engineers, history, deps = await load_world(session)
+    parent_plan = await get_plan_orm(session, plan_id)
+    q_start = parent_plan.quarter_start if (parent_plan and parent_plan.quarter_start) else calculate_quarter_start(list(tasks.values()))
+    s_length = parent_plan.sprint_length_days if (parent_plan and parent_plan.sprint_length_days) else 14
+
     current_items = (await session.execute(select(PlanItemORM).where(
         PlanItemORM.plan_id == plan_id))).scalars().all()
     facts = (await session.execute(select(SprintFactORM).where(
@@ -329,6 +362,8 @@ async def _recompute_plan_version(session, plan_id: str, after_sprint: int):
         is_initial=False,
         parent_plan_id=plan_id,
         recomputed_after_sprint=after_sprint,
+        quarter_start=q_start,
+        sprint_length_days=s_length,
     )
     session.add(new_orm)
     await session.flush()
@@ -435,9 +470,8 @@ async def plan_warnings(plan_id: str, session: AsyncSession = Depends(get_sessio
         done_task_ids.update(str(x) for x in (f.completed_task_ids or []))
     after = _recomputed_plan(plan_before, done_task_ids)
     tasks, engineers, history, deps = await load_world(session)
-    from src.services.replanner import compute_warnings
-
-    warnings = compute_warnings(plan_before, after, sorted(done_task_ids), tasks, deps, engineers)
+    q_start = plan_orm.quarter_start or calculate_quarter_start(list(tasks.values()))
+    warnings = compute_warnings(plan_before, after, sorted(done_task_ids), tasks, deps, engineers, quarter_start=q_start)
     return [w.model_dump() for w in warnings]
 
 
