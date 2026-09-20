@@ -62,7 +62,7 @@
 
 ### Requirement: Ручки онбординга
 
-API SHALL предоставлять: POST /data/upload (загрузка файла → job), GET /data/jobs/{job_id} (статус/вопросы/превью), POST /data/jobs/{job_id}/answers, POST /data/jobs/{job_id}/confirm, POST /ai/normalize, и CRUD по сущностям: /teams, /engineers, /tasks, /dependencies (POST/PUT/DELETE) с опциональными полями.
+API SHALL предоставлять: POST /data/upload (загрузка файла → job), GET /data/jobs/{job_id} (статус/вопросы/превью), POST /data/jobs/{job_id}/answers, POST /data/jobs/{job_id}/confirm, POST /ai/normalize/{job_id}, и CRUD по сущностям: /teams, /engineers, /tasks, /dependencies (POST/PUT/DELETE) с опциональными полями.
 
 #### Scenario: CRUD человека
 
@@ -73,8 +73,6 @@ API SHALL предоставлять: POST /data/upload (загрузка фай
 
 - **WHEN** GET /data/jobs/{job_id} во время LLM-фазы
 - **THEN** status: mapping|questions|ready|confirmed|failed
-
-# Update capability: architecture
 
 ### Requirement: AI-слой
 
@@ -126,3 +124,60 @@ API SHALL предоставлять GET /plans/{plan_id}/bus-risk: задачи
 
 - **WHEN** GET /plans/nonexistent/bus-risk
 - **THEN** 404 с идентификатором ошибки в теле
+
+### Requirement: Даты спринтов и прогнозные интервалы в ответе плана
+
+`GET /plans/{plan_id}` SHALL дополнительно возвращать `sprint_dates` (sprint_no → {start, end}) и прогнозный интервал дат каждой запланированной задачи; существующие поля (decision/reason/SP/роли) не меняются — обратная совместимость.
+
+#### Scenario: Даты в план-ответе
+
+- **GIVEN** план со сгенерированным календарём
+- **WHEN** GET /plans/{plan_id}
+- **THEN** доп. поле sprint_dates есть; каждая запланированная задача дополнительно содержит date_forecast {start, end}
+
+### Requirement: Форма факта с часами ролей
+
+POST /plans/{plan_id}/sprints/{n}/facts SHALL принимать опциональное поле role_hours_fact (роль → часы); формат ответа прежний (new_plan_id).
+
+#### Scenario: Факт с role_hours_fact
+
+- **WHEN** POST .../facts с {"completed_task_ids": [...], "role_hours_fact": {"Тестировщик": 32}}
+- **THEN** 200 с new_plan_id; 409 при повторе — как раньше
+
+### Requirement: Стратегия генерации и отчёты оптимизации
+
+API SHALL предоставлять: `POST /plans/generate` с опциональным body `{"strategy": "metrics" | "priority"}` (дефолт `priority`); `GET /plans/{plan_id}/optimization-report` — сравнение текущего плана с приоритетным эталоном (KPI №1 прогноз, KPI №2 по спринтам, число закрываемых инициатив, перенесённые задачи); `GET /plans/{plan_id}/staffing-suggestions` — рекомендации по людям (см. capability planning).
+
+#### Scenario: Генерация метрического плана
+
+- **WHEN** POST /plans/generate с {"strategy": "metrics"}
+- **THEN** 201 + plan_id; версия плана хранит стратегию; GET /plans/{plan_id} возвращает её
+
+#### Scenario: Отчёт оптимизации
+
+- **WHEN** GET /plans/{id}/optimization-report для метрического плана
+- **THEN** ответ содержит сравнение с priority-эталоном: KPI №1 (факт/прогноз пометки), число закрываемых инициатив, отличия состава (какие задачи вошли/вышли) — без изменения базовой метрики (знаменатель — initial-план)
+
+### Requirement: Фильтр области расчёта Bus Factor
+
+API SHALL предоставлять фильтр области в `GET /bus-factor?scope_type={company|team}&scope_id={team_id}`: ответ содержит только items выбранной области (методика сохраняется); несуществующая область — 404 с идентификатором ошибки.
+
+#### Scenario: Фильтр по команде
+
+- **GIVEN** демо-датасет импортирован
+- **WHEN** GET /bus-factor?scope_type=team&scope_id=Team-L
+- **THEN** только team-items Team-L (роли и навыки с их факторами), methodology присутствует
+
+#### Scenario: Несуществующая команда
+
+- **WHEN** GET /bus-factor?scope_type=team&scope_id=NOPE
+- **THEN** 404 с идентификатором ошибки
+
+### Requirement: Bus Factor страницы команды
+
+API SHALL предоставлять `GET /teams/{team_id}/bus-factor`: расчёт, фиксированный областью этой команды (roles + skills), с текстом методики и предупреждениями factor ≤ 1.
+
+#### Scenario: Ручка страницы команды
+
+- **WHEN** GET /teams/Team-K/bus-factor
+- **THEN** 200: items только области team=Team-K, methodology присутствует; 404 для несуществующей команды
