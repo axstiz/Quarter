@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .openspec-cache/
 node_modules/
+optimizer/target/
 
 **.db
 **.db-journal

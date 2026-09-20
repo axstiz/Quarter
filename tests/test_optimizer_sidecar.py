@@ -49,4 +49,5 @@ def test_optimizer_health_after_up():
         )
         assert out.stdout.strip() == "200"
     finally:
-        compose("down", "-v", "--remove-orphans", check=False)
+        compose("stop", "optimizer", check=False)
+        compose("rm", "-f", "optimizer", check=False)
