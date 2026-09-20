@@ -5,16 +5,17 @@ from src.main import app
 
 
 @pytest.mark.asyncio
-async def test_import_references_and_hours():
+async def test_import_references_and_hours(auths):
+    h = auths["editor"]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        imp_resp = await client.post("/api/v1/data/import")
+        imp_resp = await client.post("/api/v1/data/import", headers=h)
         assert imp_resp.status_code == 200
         counts = imp_resp.json()["counts"]
         assert counts["reference_values"] == 19
         assert counts["task_role_hours"] == 24
 
         # Task with actual hours in task_role_hours.csv (e.g., SRV-4041)
-        task_resp = await client.get("/api/v1/tasks/SRV-4041")
+        task_resp = await client.get("/api/v1/tasks/SRV-4041", headers=h)
         assert task_resp.status_code == 200
         t_data = task_resp.json()
         assert "role_hours_actual" in t_data
@@ -22,6 +23,6 @@ async def test_import_references_and_hours():
         assert t_data["role_hours_actual"]["аналитик"] == 80.0
 
         # Task without actual hours
-        task_no_actual = await client.get("/api/v1/tasks/ONK-2475")
+        task_no_actual = await client.get("/api/v1/tasks/ONK-2475", headers=h)
         assert task_no_actual.status_code == 200
         assert "role_hours_actual" not in task_no_actual.json()

@@ -42,6 +42,7 @@ def _make_role_fixture(role: str):
         session_mod.engine = engine
         session_mod.SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
         try:
+            await init_db()
             async with AsyncClient(transport=ASGITransport(app=_app()), base_url="http://test") as ac:
                 r = await ac.post("/auth/demo-login", json={"role": role})
                 r.raise_for_status()

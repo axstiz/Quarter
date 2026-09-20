@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+from datetime import date
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -34,6 +33,10 @@ class Task(BaseModel):
     estimated_hh: float = 0.0
     role_hours: dict[str, float] = {}  # роль -> требуемые часы
     spent_time: float = 0.0  # фактические потраченные часы (для InProgress-остатка)
+    planned_start: date | None = None
+    planned_end: date | None = None
+    actual_start: date | None = None
+    actual_end: date | None = None
 
 
 class Engineer(BaseModel):
