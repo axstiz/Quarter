@@ -59,12 +59,12 @@ async def reset_dataset_tables(session: AsyncSession, workspace_id: str = "defau
     не затирает ручные записи (source == manual, спека data) и другие workspace.
     Планы и факты сохраняются (спека architecture)."""
     for model in (RoleRequirementORM, DependencyORM, EngineerORM, TeamHistoryORM, TaskORM, ReferenceValueORM, TaskRoleHoursORM):
-        await session.execute(
-            model.__table__.delete().where(
-                model.__table__.c.source != "manual",
-                model.__table__.c.workspace_id == workspace_id,
-            )
-        )
+        stmt = model.__table__.delete().where(model.__table__.c.workspace_id == workspace_id)
+        if "source" in model.__table__.c:
+            stmt = stmt.where(model.__table__.c.source != "manual")
+        await session.execute(stmt)
+    await session.flush()
+    session.expire_all()
 
 
 async def import_dataset(session: AsyncSession, dataset_dir: Path, workspace_id: str = "default") -> dict[str, int]:
@@ -100,6 +100,7 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path, workspace_id:
             actual_end=_date(row.get("actual_end", "")),
         ))
     counts["tasks"] = len(tasks_rows) - len(existing_ids & {r["task_id"] for r in tasks_rows})
+    await session.flush()
 
     seen_deps = set()
     for row in read_csv(dataset_dir / "task_dependencies.csv"):
@@ -115,7 +116,10 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path, workspace_id:
         ))
     counts["dependencies"] = len(seen_deps)
 
+    valid_task_ids = {r["task_id"] for r in tasks_rows} | existing_ids
     for row in read_csv(dataset_dir / "task_role_requirements.csv"):
+        if row["task_id"] not in valid_task_ids:
+            continue
         session.add(RoleRequirementORM(
             workspace_id=workspace_id,
             task_id=row["task_id"],

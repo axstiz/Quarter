@@ -10,7 +10,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,8 +31,12 @@ from src.api.permissions import require_permission
 from src.db.session import get_session
 from src.domain.models import (
     SPRINTS_PER_QUARTER,
+    Assignment,
     Engineer,
     Explanation,
+    PersonPlanResponse,
+    PersonScheduleItem,
+    PinRequest,
     Plan,
     PlanDecision,
     PlanItem,
@@ -110,12 +114,17 @@ def _plan_from_orm(plan_id: str, items: list[PlanItemORM]) -> Plan:
                 sprint_no=it.sprint_no or 0,
                 items=[],
             ))
+            ass_list = [Assignment(**a) for a in (it.assignments or [])] if isinstance(it.assignments, list) else []
             bucket.items.append(PlanItem(
                 task_id=it.task_id,
                 decision=PlanDecision.planned,
                 sprint_no=it.sprint_no,
                 reason=it.reason,
                 step_points_sp=it.planned_sp,
+                assignments=ass_list,
+                pinned_sprint=it.pinned_sprint,
+                pinned_engineer_id=it.pinned_engineer_id,
+                pinned_position=it.pinned_position,
             ))
         else:
             plan.decisions.append(Explanation(
@@ -160,18 +169,25 @@ async def generate_plan_endpoint(
     await ctx.session.flush()
     for sprint in plan.sprints:
         for item in sprint.items:
+            ass_data = [a.model_dump() for a in item.assignments] if item.assignments else []
             ctx.session.add(PlanItemORM(
                 plan_id=plan_orm.plan_id,
+                workspace_id=workspace_id,
                 task_id=item.task_id,
                 team_id=tasks[item.task_id].team_id if item.task_id in tasks else "",
                 decision=item.decision.value,
                 sprint_no=item.sprint_no,
                 reason=item.reason,
                 planned_sp=item.step_points_sp,
+                assignments=ass_data,
+                pinned_sprint=item.pinned_sprint,
+                pinned_engineer_id=item.pinned_engineer_id,
+                pinned_position=item.pinned_position,
             ))
     for d in plan.decisions:
         ctx.session.add(PlanItemORM(
             plan_id=plan_orm.plan_id,
+            workspace_id=workspace_id,
             task_id=d.task_id,
             team_id=tasks[d.task_id].team_id if d.task_id in tasks else "",
             decision=d.decision.value,
@@ -982,3 +998,197 @@ async def confirm_cancel(plan_id: str, task_id: str,
                 item.reason = f"отмена подтверждена {ctx.user.email} (лидом)"
     await ctx.session.commit()
     return {"status": "cancelled", "task_id": task_id}
+
+
+# --- 016-person-planner: личный план и pin/unpin -------------------
+
+@router.get("/plans/{plan_id}/people/{engineer_id}")
+async def get_person_plan(
+    plan_id: str,
+    engineer_id: str,
+    ctx: Context = Depends(require_context),
+) -> PersonPlanResponse:
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
+    if not plan_orm:
+        raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
+
+    tasks, engineers, _, _ = await load_world(ctx.session, workspace_id=ctx.workspace_id)
+    engineer = next((e for e in engineers if e.engineer_id == engineer_id), None)
+    if not engineer:
+        raise HTTPException(status_code=404, detail=f"инженер {engineer_id} не найден")
+
+    items = await get_plan_items(ctx.session, plan_id)
+    plan = _plan_from_orm(plan_id, items)
+
+    schedules: dict[int, list[PersonScheduleItem]] = defaultdict(list)
+    for sprint in plan.sprints:
+        for item in sprint.items:
+            for ass in item.assignments:
+                if ass.engineer_id == engineer_id:
+                    task = tasks.get(item.task_id)
+                    schedules[sprint.sprint_no].append(PersonScheduleItem(
+                        task_id=item.task_id,
+                        role=ass.role,
+                        hours=ass.hours,
+                        position=len(schedules[sprint.sprint_no]) + 1,
+                        is_pinned=ass.is_pinned or (item.pinned_engineer_id == engineer_id),
+                        summary=task.summary if task else "",
+                    ))
+
+    return PersonPlanResponse(
+        engineer_id=engineer.engineer_id,
+        team_id=engineer.team_id,
+        role=engineer.role,
+        capacity_rate=engineer.capacity_rate,
+        hours_per_sprint=engineer.hours_per_sprint,
+        schedules=dict(schedules),
+    )
+
+
+@router.post("/plans/{plan_id}/tasks/{task_id}/pin")
+async def pin_task(
+    plan_id: str,
+    task_id: str,
+    body: PinRequest,
+    ctx: Context = Depends(require_permission("plans_generate")),
+) -> dict:
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
+    if not plan_orm:
+        raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
+
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail=f"задача {task_id} не найдена")
+
+    blocking_ids = [a for a, b in deps if b == task_id]
+    items = await get_plan_items(ctx.session, plan_id)
+    existing_pins: dict[str, dict] = {}
+    for item in items:
+        if item.pinned_sprint is not None and item.task_id != task_id:
+            existing_pins[item.task_id] = {
+                "sprint_no": item.pinned_sprint,
+                "engineer_id": item.pinned_engineer_id,
+                "position": item.pinned_position,
+            }
+
+    for b_id in blocking_ids:
+        b_sprint = existing_pins.get(b_id, {}).get("sprint_no")
+        if b_sprint and b_sprint >= body.sprint_no:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Конфликт закрепления: задача {task_id} зависит от {b_id}, которая закреплена на спринт {b_sprint} >= {body.sprint_no}",
+            )
+
+    if body.engineer_id:
+        eng = next((e for e in engineers if e.engineer_id == body.engineer_id), None)
+        if not eng:
+            raise HTTPException(status_code=404, detail=f"инженер {body.engineer_id} не найден")
+
+    existing_pins[task_id] = {
+        "sprint_no": body.sprint_no,
+        "engineer_id": body.engineer_id,
+        "position": body.position,
+    }
+
+    new_plan = generate_plan(
+        PlannerInput(list(tasks.values()), engineers, history, deps),
+        strategy=plan_orm.strategy or "priority",
+        pins=existing_pins,
+    )
+
+    await ctx.session.execute(
+        delete(PlanItemORM).where(PlanItemORM.plan_id == plan_id)
+    )
+    for sprint in new_plan.sprints:
+        for item in sprint.items:
+            ass_data = [a.model_dump() for a in item.assignments] if item.assignments else []
+            ctx.session.add(PlanItemORM(
+                plan_id=plan_id,
+                workspace_id=ctx.workspace_id,
+                task_id=item.task_id,
+                team_id=tasks[item.task_id].team_id if item.task_id in tasks else "",
+                decision=item.decision.value,
+                sprint_no=item.sprint_no,
+                reason=item.reason,
+                planned_sp=item.step_points_sp,
+                assignments=ass_data,
+                pinned_sprint=item.pinned_sprint,
+                pinned_engineer_id=item.pinned_engineer_id,
+                pinned_position=item.pinned_position,
+            ))
+    for d in new_plan.decisions:
+        ctx.session.add(PlanItemORM(
+            plan_id=plan_id,
+            workspace_id=ctx.workspace_id,
+            task_id=d.task_id,
+            team_id=tasks[d.task_id].team_id if d.task_id in tasks else "",
+            decision=d.decision.value,
+            sprint_no=None,
+            reason=d.reason,
+        ))
+    await ctx.session.commit()
+
+    return {"status": "pinned", "plan_id": plan_id, "task_id": task_id, "sprint_no": body.sprint_no}
+
+
+@router.delete("/plans/{plan_id}/tasks/{task_id}/pin")
+async def unpin_task(
+    plan_id: str,
+    task_id: str,
+    ctx: Context = Depends(require_permission("plans_generate")),
+) -> dict:
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
+    if not plan_orm:
+        raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
+
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
+    items = await get_plan_items(ctx.session, plan_id)
+
+    existing_pins: dict[str, dict] = {}
+    for item in items:
+        if item.pinned_sprint is not None and item.task_id != task_id:
+            existing_pins[item.task_id] = {
+                "sprint_no": item.pinned_sprint,
+                "engineer_id": item.pinned_engineer_id,
+                "position": item.pinned_position,
+            }
+
+    new_plan = generate_plan(
+        PlannerInput(list(tasks.values()), engineers, history, deps),
+        strategy=plan_orm.strategy or "priority",
+        pins=existing_pins,
+    )
+
+    await ctx.session.execute(
+        delete(PlanItemORM).where(PlanItemORM.plan_id == plan_id)
+    )
+    for sprint in new_plan.sprints:
+        for item in sprint.items:
+            ass_data = [a.model_dump() for a in item.assignments] if item.assignments else []
+            ctx.session.add(PlanItemORM(
+                plan_id=plan_id,
+                workspace_id=ctx.workspace_id,
+                task_id=item.task_id,
+                team_id=tasks[item.task_id].team_id if item.task_id in tasks else "",
+                decision=item.decision.value,
+                sprint_no=item.sprint_no,
+                reason=item.reason,
+                planned_sp=item.step_points_sp,
+                assignments=ass_data,
+                pinned_sprint=item.pinned_sprint,
+                pinned_engineer_id=item.pinned_engineer_id,
+                pinned_position=item.pinned_position,
+            ))
+    for d in new_plan.decisions:
+        ctx.session.add(PlanItemORM(
+            plan_id=plan_id,
+            workspace_id=ctx.workspace_id,
+            task_id=d.task_id,
+            team_id=tasks[d.task_id].team_id if d.task_id in tasks else "",
+            decision=d.decision.value,
+            sprint_no=None,
+            reason=d.reason,
+        ))
+    await ctx.session.commit()
+
+    return {"status": "unpinned", "plan_id": plan_id, "task_id": task_id}
