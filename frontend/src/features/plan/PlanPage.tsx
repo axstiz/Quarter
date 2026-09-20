@@ -2,6 +2,7 @@ import { CalendarRange, RotateCcw, ShieldAlert, Upload } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
+import { canEdit, getRole } from '@/api/auth'
 import { useBusFactor, useCurrentPlanId, useFacts, useGeneratePlan, usePlan, usePlanVersions, useTasks } from '@/api/queries'
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber'
 import { Button } from '@/components/ui/Button'
@@ -38,7 +39,7 @@ export function PlanPage() {
   const risks = useMemo(() => (model ? tasksAtRisk(model.tasks.values(), bus.data) : []), [model, bus.data])
   const fixedSprints = useMemo(() => new Set(facts.data?.map((f) => f.sprint_no)), [facts.data])
   const latestId = versions.data?.at(-1)?.plan_id
-  const readOnly = !!planId && !!latestId && planId !== latestId
+  const readOnly = (!!planId && !!latestId && planId !== latestId) || !canEdit(getRole())
 
   const runGenerate = () =>
     generate.mutate(undefined, {
@@ -61,12 +62,21 @@ export function PlanPage() {
           text="Загрузите задачи и инженеров, затем постройте план на 6 спринтов. Решение по каждой задаче будет с причиной."
           actions={
             <>
-              <Link to="/import" className="btn btn--secondary" style={{ textDecoration: 'none' }}>
-                <Upload aria-hidden /> <span className="btn__label">Загрузить данные</span>
-              </Link>
-              <Button variant="primary" loading={generate.isPending} onClick={runGenerate}>
-                Построить план
-              </Button>
+              {canEdit(getRole()) && (
+                <Link to="/import" className="btn btn--secondary" style={{ textDecoration: 'none' }}>
+                  <Upload aria-hidden /> <span className="btn__label">Загрузить данные</span>
+                </Link>
+              )}
+              {canEdit(getRole()) && (
+                <Button variant="primary" loading={generate.isPending} onClick={runGenerate}>
+                  Построить план
+                </Button>
+              )}
+              {!canEdit(getRole()) && (
+                <p className="muted" style={{ margin: 0, fontSize: 'var(--text-sm)' }}>
+                  Просмотр недоступен: данных ещё нет. Заходите как редактор (демо-вход) или загрузите данные.
+                </p>
+              )}
             </>
           }
         />

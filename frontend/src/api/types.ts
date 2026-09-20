@@ -73,7 +73,7 @@ export interface RecomputeResponse {
   after_sprint: number
 }
 
-export type WarningKind = 'deadline_overflow' | 'dependency_shift' | 'role_deficit' | 'composition_change'
+export type WarningKind = 'deadline_overflow' | 'dependency_shift' | 'role_deficit' | 'grade_deficit' | 'composition_change'
 
 export interface PlanWarning {
   kind: WarningKind

@@ -1,3 +1,5 @@
+import { clearAuth, loadAuth } from './auth'
+
 export const API_BASE = '/api/v1'
 
 // Мок-режим включается VITE_API_MOCKS=true (.env.development).
@@ -15,6 +17,8 @@ export class ApiError extends Error {
 
 type Method = 'GET' | 'POST' | 'PUT' | 'DELETE'
 
+let authRedirecting = false
+
 export async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
   if (USE_MOCKS) {
     const { handleMock } = await import('../mocks')
@@ -22,11 +26,25 @@ export async function request<T>(method: Method, path: string, body?: unknown): 
   }
 
   const isForm = body instanceof FormData
+  const headers: Record<string, string> = body && !isForm ? { 'Content-Type': 'application/json' } : {}
+  const auth = loadAuth()
+  if (auth?.token && !path.startsWith('/auth/')) headers.Authorization = `Bearer ${auth.token}`
+
   const res = await fetch(API_BASE + path, {
     method,
-    headers: body && !isForm ? { 'Content-Type': 'application/json' } : undefined,
+    headers,
     body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
   })
+
+  if (res.status === 401 && !authRedirecting) {
+    // Просроченный/чужой токен: выходим на экран входа (избегаем цикла редиректов)
+    authRedirecting = true
+    clearAuth()
+    if (!window.location.pathname.startsWith('/login')) {
+      window.location.assign('/login?expired=1')
+    }
+    authRedirecting = false
+  }
 
   const data = res.status === 204 ? null : await res.json().catch(() => null)
   if (!res.ok) {

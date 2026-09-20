@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom'
 import { useDiff, useWarnings } from '@/api/queries'
 import type { WarningKind } from '@/api/types'
 import { ErrorAlert, SkeletonRows } from '@/components/ui/States'
-import { WARNING_LABEL } from '@/lib/labels'
+import { warningLabel } from '@/lib/labels'
 import { stagger } from '@/lib/motion'
 
 const KINDS: { kind: WarningKind; icon: typeof CalendarX2 }[] = [
@@ -106,7 +106,7 @@ function WarningRow({ kind, icon: Icon, index, items, taskLink }: { kind: Warnin
       {hit ? <Icon aria-hidden style={{ width: 18, height: 18, color: 'var(--over)', marginTop: 1 }} /> : <CheckCircle2 aria-hidden style={{ width: 18, height: 18, color: 'var(--done)', marginTop: 1 }} />}
       <div style={{ minWidth: 0 }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>{WARNING_LABEL[kind]}</span>
+          <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>{warningLabel(kind)}</span>
           {hit && messages.length > 1 && <span className="badge badge--plain" data-tone="over">{messages.length}</span>}
         </div>
         {!hit ? (

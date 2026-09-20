@@ -3,6 +3,7 @@ import { CheckCircle2, ClipboardCheck, Lock, RefreshCw } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
+import { canEdit, getRole } from '@/api/auth'
 import { useCurrentPlanId, useFacts, usePlan, usePlanVersions, useRecompute, useSubmitFact, useTasks } from '@/api/queries'
 import type { PlanRow } from '@/lib/planModel'
 import { buildPlanModel } from '@/lib/planModel'
@@ -29,7 +30,7 @@ export function SprintFactPage() {
   const [resultParam, setResultParam] = useParam('result')
 
   const latestId = versions.data?.at(-1)?.plan_id
-  const readOnly = !!planId && !!latestId && planId !== latestId
+  const readOnly = (!!planId && !!latestId && planId !== latestId) || !canEdit(getRole())
   const factBySprint = useMemo(() => new Map(facts.data?.map((f) => [f.sprint_no, f])), [facts.data])
   const nextOpen = [1, 2, 3, 4, 5, 6].find((n) => !factBySprint.has(n))
   const sprintNo = Number(sprintParam) || nextOpen || 6

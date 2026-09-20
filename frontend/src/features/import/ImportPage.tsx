@@ -4,6 +4,7 @@ import { CheckCircle2, FileSpreadsheet, HelpCircle, Loader2, UploadCloud } from 
 import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
+import { canEdit, getRole } from '@/api/auth'
 import { api } from '@/api/endpoints'
 import { useGeneratePlan, usePlanVersions } from '@/api/queries'
 import type { ConfirmResponse, UploadJob } from '@/api/types'
@@ -23,6 +24,7 @@ const STEPS = ['Файл', 'Сопоставление', 'Проверка']
 /** Импорт в 3 шага: файл → сопоставление колонок → проверка. В базу ничего не пишется до «Импортировать». */
 export function ImportPage() {
   const qc = useQueryClient()
+  const editorAllowed = canEdit(getRole())
   const [jobId, setJobId] = useState<string | null>(null)
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [result, setResult] = useState<ConfirmResponse | null>(null)
@@ -89,6 +91,11 @@ export function ImportPage() {
         >
           {result ? (
             <Done result={result} onRestart={restart} />
+          ) : !editorAllowed ? (
+            <div className="callout" data-tone="shift">
+              <div className="callout__title">Только просмотр</div>
+              <p style={{ margin: 0 }}>Импорт требует роли редактора или администратора. Выполните демо-вход с этой ролью на экране входа.</p>
+            </div>
           ) : !data ? (
             <Dropzone loading={upload.isPending} error={upload.error} onFile={(f) => upload.mutate(f)} />
           ) : (

@@ -6,10 +6,13 @@ import { USE_MOCKS } from '@/api/client'
 import { useCurrentPlanId, useFacts, usePlanVersions } from '@/api/queries'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Field'
+import { clearAuth, getRole, type AuthRole } from '@/api/auth'
 import { formatDateTime } from '@/lib/format'
 import { versionLabel } from '@/lib/labels'
 import { t } from '@/lib/motion'
 import { useTheme } from './theme'
+
+const ROLE_LABEL: Record<AuthRole, string> = { reader: 'Наблюдатель', editor: 'Редактор', admin: 'Администратор' }
 
 const NAV = [
   { to: '/plan', label: 'План квартала', icon: CalendarRange },
@@ -52,6 +55,7 @@ function Sidebar({ open }: { open: boolean }) {
   const { theme, toggle } = useTheme()
   const plan = params.get('plan')
   const search = plan ? `?plan=${plan}` : ''
+  const role = getRole()
 
   return (
     <aside className="sidebar" data-open={open} aria-label="Навигация">
@@ -60,6 +64,7 @@ function Sidebar({ open }: { open: boolean }) {
         <div>
           <div className="brand__name">Квартал</div>
           <div className="brand__sub">планирование команд</div>
+          {role && <div className="brand__sub">роль: {ROLE_LABEL[role]}</div>}
         </div>
       </div>
       <nav className="nav">
@@ -85,12 +90,20 @@ function Sidebar({ open }: { open: boolean }) {
             </>
           )}
         </NavLink>
-        <Link to="/login" className="nav__item">
+        <Link
+          to="/login"
+          className="nav__item"
+          onClick={() => { if (!USE_MOCKS || getRole()) clearAuth() }}
+        >
           <LogOut aria-hidden />
           <span>Выйти</span>
         </Link>
         <div className="sidebar__meta">
-          <span className="muted" style={{ fontSize: 'var(--text-2xs)' }} title={USE_MOCKS ? 'VITE_API_MOCKS=true — данные из src/mocks' : 'Данные из /api/v1'}>
+          <span
+            className="muted"
+            style={{ fontSize: 'var(--text-2xs)' }}
+            title={USE_MOCKS ? 'VITE_API_MOCKS=true — данные из src/mocks' : 'Данные из /api/v1'}
+          >
             {USE_MOCKS ? 'Мок-данные' : 'API подключён'}
           </span>
           <Button variant="ghost" size="sm" iconOnly icon={theme === 'dark' ? <Sun /> : <Moon />} onClick={toggle} aria-label={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'} />
