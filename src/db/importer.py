@@ -10,8 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db.models import (
     DependencyORM,
     EngineerORM,
+    ReferenceValueORM,
     RoleRequirementORM,
     TaskORM,
+    TaskRoleHoursORM,
     TeamHistoryORM,
 )
 
@@ -54,8 +56,9 @@ def read_csv(path: Path) -> list[dict[str, str]]:
 
 async def reset_dataset_tables(session: AsyncSession, workspace_id: str = "default") -> None:
     """Повторный импорт очищает только импортные записи текущего workspace,
-    не затирает ручные записи (source == manual) и другие workspace."""
-    for model in (RoleRequirementORM, DependencyORM, EngineerORM, TeamHistoryORM, TaskORM):
+    не затирает ручные записи (source == manual, спека data) и другие workspace.
+    Планы и факты сохраняются (спека architecture)."""
+    for model in (RoleRequirementORM, DependencyORM, EngineerORM, TeamHistoryORM, TaskORM, ReferenceValueORM, TaskRoleHoursORM):
         await session.execute(
             model.__table__.delete().where(
                 model.__table__.c.source != "manual",
@@ -143,6 +146,33 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path, workspace_id:
         ))
         n_hist += 1
     counts["team_history"] = n_hist
+
+    ref_rows = read_csv(dataset_dir / "reference_values.csv")
+    for row in ref_rows:
+        session.add(ReferenceValueORM(
+            workspace_id=workspace_id,
+            category=row.get("category", ""),
+            value=row.get("value", ""),
+        ))
+    counts["reference_values"] = len(ref_rows)
+
+    hours_rows = read_csv(dataset_dir / "task_role_hours.csv")
+    hours_count = 0
+    for row in hours_rows:
+        tid = row.get("task_id", "")
+        for col, val_str in row.items():
+            if col in ("task_id", "исходное_время"):
+                continue
+            val = _f(val_str)
+            if val > 0:
+                session.add(TaskRoleHoursORM(
+                    workspace_id=workspace_id,
+                    task_id=tid,
+                    role=col,
+                    hours=val,
+                ))
+                hours_count += 1
+    counts["task_role_hours"] = hours_count
 
     await session.commit()
     return counts

@@ -726,10 +726,17 @@ async def task_detail(task_id: str, ctx: Context = Depends(require_context)) -> 
     task = tasks.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="задача не найдена")
-    return task.model_dump() | {
+    from src.db.models import TaskRoleHoursORM
+
+    actual_rows = (await session.execute(select(TaskRoleHoursORM).where(TaskRoleHoursORM.task_id == task_id))).scalars().all()
+    actual_hours = {r.role: r.hours for r in actual_rows}
+    res = task.model_dump() | {
         "blocks": [b for a, b in deps if a == task_id],
         "blocked_by": [a for a, b in deps if b == task_id],
     }
+    if actual_hours:
+        res["role_hours_actual"] = actual_hours
+    return res
 
 
 @router.get("/engineers")
