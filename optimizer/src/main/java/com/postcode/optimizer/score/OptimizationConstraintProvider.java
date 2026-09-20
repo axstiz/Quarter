@@ -15,6 +15,8 @@ import com.postcode.optimizer.domain.TaskPartAssignment;
 import com.postcode.optimizer.domain.TeamVelocity;
 
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
 
 /**
  * Жёсткие ограничения оптимизации (change 018, spec planning): повторяют правила change 003 как hard —
@@ -203,4 +205,17 @@ public class OptimizationConstraintProvider implements ConstraintProvider {
             return new ParentCount(parent, total);
         }
     }
+
+    /** Имя ограничения → построитель одиночного ограничения (для OSS-разбивки score в solve-контракте). */
+    public static final Map<String, Function<ConstraintFactory, Constraint>> CONSTRAINT_FUNCTIONS = Map.of(
+            "teamSpCapacity", f -> new OptimizationConstraintProvider().teamSpCapacity(f),
+            "roleHoursCapacity", f -> new OptimizationConstraintProvider().roleHoursCapacity(f),
+            "dependencyAfterBlocker", f -> new OptimizationConstraintProvider().dependencyAfterBlocker(f),
+            "soleHolderNotMoved", f -> new OptimizationConstraintProvider().soleHolderNotMoved(f),
+            "initiativeCompletedReward", f -> new OptimizationConstraintProvider().initiativeCompletedReward(f),
+            "strategicSpReward", f -> new OptimizationConstraintProvider().strategicSpReward(f),
+            "teamUtilizationPenalty", f -> new OptimizationConstraintProvider().teamUtilizationPenalty(f),
+            "unclosedRoleHoursPenalty", f -> new OptimizationConstraintProvider().unclosedRoleHoursPenalty(f),
+            "staffingMovePenalty", f -> new OptimizationConstraintProvider().staffingMovePenalty(f),
+            "priorityOrderPenalty", f -> new OptimizationConstraintProvider().priorityOrderPenalty(f));
 }
