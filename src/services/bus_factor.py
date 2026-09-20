@@ -23,46 +23,68 @@ def _holders_by(engineers: list[Engineer], key_of) -> dict[tuple[str, str], set[
     return out
 
 
-def compute_bus_factor(engineers: list[Engineer]) -> BusFactorReport:
+def compute_bus_factor(
+    engineers: list[Engineer],
+    scope_type: str | None = None,
+    scope_id: str | None = None,
+) -> BusFactorReport:
     items: list[BusFactorItem] = []
     skill_of = lambda e: [
         s.strip().lower() for s in e.skills_declared.split(",") if s.strip()
     ]
-    for scope, key_of in (
-        ("role", lambda e: [e.role.lower()]),
-    ):
-        by_role: dict[str, set[str]] = {}
-        by_role_team: dict[tuple[str, str], set[str]] = {}
-        by_skill: dict[str, set[str]] = {}
-        by_skill_team: dict[tuple[str, str], set[str]] = {}
-        for e in engineers:
-            for scope_key in (e.role.lower(),):
-                by_role.setdefault(scope_key, set()).add(e.engineer_id)
-                by_role_team.setdefault((e.team_id, scope_key), set()).add(e.engineer_id)
-            for s in skill_of(e):
-                by_skill.setdefault(s, set()).add(e.engineer_id)
-                by_skill_team.setdefault((e.team_id, s), set()).add(e.engineer_id)
+    by_role: dict[str, set[str]] = {}
+    by_role_team: dict[tuple[str, str], set[str]] = {}
+    by_skill: dict[str, set[str]] = {}
+    by_skill_team: dict[tuple[str, str], set[str]] = {}
 
-        for source, by_scope, by_team_scope in (
-            ("role", by_role, by_role_team),
-            ("skill", by_skill, by_skill_team),
-        ):
-            for key, holders in by_scope.items():
-                items.append(BusFactorItem(
-                    scope_type="company",
-                    scope_id="company",
-                    key=key,
-                    holders=sorted(holders),
-                    factor=len(holders),
-                ))
-            for (team, key), holders in by_team_scope.items():
-                items.append(BusFactorItem(
-                    scope_type="team",
-                    scope_id=team,
-                    key=key,
-                    holders=sorted(holders),
-                    factor=len(holders),
-                ))
+    for e in engineers:
+        for scope_key in (e.role.lower(),):
+            by_role.setdefault(scope_key, set()).add(e.engineer_id)
+            by_role_team.setdefault((e.team_id, scope_key), set()).add(e.engineer_id)
+        for s in skill_of(e):
+            by_skill.setdefault(s, set()).add(e.engineer_id)
+            by_skill_team.setdefault((e.team_id, s), set()).add(e.engineer_id)
+
+    for key, holders in sorted(by_role.items()):
+        items.append(BusFactorItem(
+            scope_type="company",
+            scope_id="company",
+            key=key,
+            holders=sorted(holders),
+            factor=len(holders),
+        ))
+    for (team, key), holders in sorted(by_role_team.items()):
+        items.append(BusFactorItem(
+            scope_type="team",
+            scope_id=team,
+            key=key,
+            holders=sorted(holders),
+            factor=len(holders),
+        ))
+
+    for key, holders in sorted(by_skill.items()):
+        items.append(BusFactorItem(
+            scope_type="company",
+            scope_id="company",
+            key=key,
+            holders=sorted(holders),
+            factor=len(holders),
+        ))
+    for (team, key), holders in sorted(by_skill_team.items()):
+        items.append(BusFactorItem(
+            scope_type="team",
+            scope_id=team,
+            key=key,
+            holders=sorted(holders),
+            factor=len(holders),
+        ))
+
+    if scope_type:
+        st = scope_type.lower()
+        items = [i for i in items if i.scope_type == st]
+        if scope_id:
+            items = [i for i in items if i.scope_id == scope_id]
+
     return BusFactorReport(items=items, methodology=METHODOLOGY)
 
 
