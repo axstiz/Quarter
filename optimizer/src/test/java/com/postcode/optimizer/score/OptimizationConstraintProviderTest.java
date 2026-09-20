@@ -55,7 +55,7 @@ class OptimizationConstraintProviderTest {
                 List.of(), List.of(), List.of(), List.of(), List.of(new TeamVelocity("Team-A", 100)),
                 List.of(part("T-1", 1, 90, "Team-A", 1, Map.of())), List.of());
         verifier.verifyThat(OptimizationConstraintProvider::teamSpCapacity)
-                .givenSolution(d).penalizes(10);
+                .givenSolution(d).penalizesBy(10);
     }
 
     @Test
@@ -81,7 +81,7 @@ class OptimizationConstraintProviderTest {
                         part("T-2", 1, 10, "Team-A", 1, Map.of("Dev", 40.0))),
                 List.of());
         verifier.verifyThat(OptimizationConstraintProvider::roleHoursCapacity)
-                .givenSolution(d).penalizes(10);
+                .givenSolution(d).penalizesBy(10);
     }
 
     @Test
@@ -93,7 +93,7 @@ class OptimizationConstraintProviderTest {
                 List.of(part("T-1", 1, 10, "Team-A", 1, Map.of("Аналитик", 100.0))),
                 List.of());
         verifier.verifyThat(OptimizationConstraintProvider::roleHoursCapacity)
-                .givenSolution(d).penalizes(20);
+                .givenSolution(d).penalizesBy(20);
     }
 
     @Test
@@ -115,7 +115,7 @@ class OptimizationConstraintProviderTest {
                         part("T-B", 1, 10, "Team-A", 1, Map.of())),
                 List.of());
         verifier.verifyThat(OptimizationConstraintProvider::dependencyAfterBlocker)
-                .givenSolution(d).penalizes(3);
+                .givenSolution(d).penalizesBy(3);
     }
 
     @Test
