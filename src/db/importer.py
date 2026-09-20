@@ -155,7 +155,7 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path, workspace_id:
     for row in ref_rows:
         session.add(ReferenceValueORM(
             workspace_id=workspace_id,
-            category=row.get("category", ""),
+            category=row.get("value_type", row.get("category", "")),
             value=row.get("value", ""),
         ))
     counts["reference_values"] = len(ref_rows)

@@ -226,6 +226,8 @@ curl localhost:8000/api/v1/star-map/summary
 
 Всего ручек и схем — /docs (Swagger UI). До запуска `data/import` планирование недоступно (400).
 
+Календарь квартала (change 010, решение №12): старт квартала — `max(planned_end) → fallback actual_end → календарный квартал`; `GET /plans/{id}` содержит `quarter_start`, `sprint_dates` (6 × start/end по 2 недели) и `date_forecast {start, end}` у каждой запланированной задачи; интервалы переносятся при пересчёте.
+
 ### Правила планирования (допущения, change 003)
 
 - **Приоритет**: поле `priority` задачи (меньше — раньше). Seed при импорте: задачи заказчика (`planned_in_sprint='Да'`) → 10; остальные — 100 + исходный порядок файла. Меняется вручную: `PUT /tasks/{id}/priority`.

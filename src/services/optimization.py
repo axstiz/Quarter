@@ -7,66 +7,41 @@ from src.services.planner import PlannerInput, generate_plan
 
 def generate_optimization_report(
     plan: Plan,
+    baseline_plan: Plan,
     tasks: dict[str, Task],
-    engineers: list[Engineer],
-    history: list,
-    deps: list,
-    strategy_used: str = "priority",
+    metrics_report: dict,
 ) -> dict:
     """
-    Сравнение с priority-эталоном:
-    прогноз выполнения инициатив, различия состава, статус норм KPI.
+    Comparison план (текущая стратегия) против priority-эталона:
+    различия состава + честные метрики из compute_metrics_initiatives
+    (знаменатель — initial-план, факт/прогноз развязаны; «нет данных» — null).
     """
-    # Baseline plan with priority strategy
-    planner_in = PlannerInput(list(tasks.values()), engineers, history, deps)
-    baseline_plan = generate_plan(planner_in, strategy="priority")
-
-    cur_planned_tasks = {
-        item.task_id for s in plan.sprints for item in s.items
-    }
-    base_planned_tasks = {
-        item.task_id for s in baseline_plan.sprints for item in s.items
-    }
+    cur_planned_tasks = {item.task_id for s in plan.sprints for item in s.items}
+    base_planned_tasks = {item.task_id for s in baseline_plan.sprints for item in s.items}
 
     added = sorted(cur_planned_tasks - base_planned_tasks)
     removed = sorted(base_planned_tasks - cur_planned_tasks)
 
-    # Initiative completion stats
-    planned_by_parent: dict[str, set[str]] = {}
-    for tid in cur_planned_tasks:
-        task = tasks.get(tid)
-        if task:
-            parent = task.parent_id or task.task_id
-            planned_by_parent.setdefault(parent, set()).add(tid)
-
-    total_initiatives = len(planned_by_parent)
-    # Forecast completion % (ratio of planned tasks vs total)
-    total_tasks_count = len(cur_planned_tasks)
-    total_all_tasks = len(tasks)
-    forecast_pct = round(total_tasks_count / total_all_tasks * 100.0, 1) if total_all_tasks else 0.0
+    kpi = {
+        # % выполнения квартального плана: закрытые инициативы / включённые в initial (метрики ТЗ)
+        "quarter_completion_pct": metrics_report.get("quarter_completion_pct"),
+        "quarter_is_forecast": metrics_report.get("quarter_completion_is_forecast", True),
+        "quarter_target_band": metrics_report.get("quarter_target_band"),
+        "quarter_within_norm": metrics_report.get("quarter_within_norm"),
+        # Say/Do по фактам спринтов; нет фактов — нет данных (не константа)
+        "say_do_pct_by_sprint": metrics_report.get("sprint_completion_pct"),
+        "say_do_is_forecast": metrics_report.get("sprint_completion_is_forecast"),
+        "say_do_target_band": metrics_report.get("sprint_target_band"),
+        "say_do_within_norm": metrics_report.get("sprint_within_norm"),
+    }
 
     return {
-        "strategy_used": strategy_used,
+        "strategy_used": metrics_report.get("strategy_used", "priority"),
         "baseline_strategy": "priority",
-        "forecast_completion_pct": forecast_pct,
-        "initiatives_completed": total_initiatives,
-        "initiatives_total": total_initiatives,
-        "composition_diff": {
-            "added_tasks": added,
-            "removed_tasks": removed,
-        },
-        "kpi_summary": {
-            "pi_predictability": {
-                "value": forecast_pct,
-                "target_band": [80.0, 100.0],
-                "within_norm": 80.0 <= forecast_pct <= 100.0,
-            },
-            "say_do": {
-                "value": 100.0,
-                "target_band": [90.0, 105.0],
-                "within_norm": True,
-            },
-        },
+        "quarter_completion_pct": metrics_report.get("quarter_completion_pct"),
+        "quarter_within_norm": metrics_report.get("quarter_within_norm"),
+        "composition_diff": {"added_tasks": added, "removed_tasks": removed},
+        "kpi_summary": kpi,
     }
 
 

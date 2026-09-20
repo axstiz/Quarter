@@ -55,12 +55,18 @@ async def test_api_metric_driven_order_and_reports(auths):
         r_bad = await client.post("/api/v1/plans/generate", headers=h, json={"strategy": "invalid"})
         assert r_bad.status_code == 422
 
-        # 3) GET /plans/{id}/optimization-report
+        # 3) GET /plans/{id}/optimization-report — честные метрики (без фактов — null/прогноз)
         r_opt = await client.get(f"/api/v1/plans/{plan_id}/optimization-report", headers=h)
         assert r_opt.status_code == 200
         opt_data = r_opt.json()
         assert opt_data["strategy_used"] == "metrics"
         assert "kpi_summary" in opt_data
+        assert opt_data["kpi_summary"]["quarter_is_forecast"] is True
+        # фактов ещё нет — Say/Do без данных, а не константа
+        assert all(v is None for v in opt_data["kpi_summary"]["say_do_pct_by_sprint"].values())
+        assert opt_data["kpi_summary"]["say_do_within_norm"] == {n: None for n in range(1, 7)} or all(
+            v is None for v in opt_data["kpi_summary"]["say_do_within_norm"].values())
+        assert "composition_diff" in opt_data
 
         # 4) GET /plans/{id}/staffing-suggestions
         r_stf = await client.get(f"/api/v1/plans/{plan_id}/staffing-suggestions", headers=h)

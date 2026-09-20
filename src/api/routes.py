@@ -20,6 +20,7 @@ from src.db.models import (
     EngineerORM,
     PlanItemORM,
     PlanORM,
+    ReferenceValueORM,
     RoleRequirementORM,
     SprintFactORM,
     TaskORM,
@@ -550,7 +551,15 @@ async def plan_warnings(plan_id: str, ctx: Context = Depends(require_context)) -
 
     q_start = plan_orm.quarter_start or calculate_quarter_start(list(tasks.values()))
     warnings = compute_warnings(plan_before, after, sorted(done_task_ids), tasks, deps, engineers, quarter_start=q_start)
-    return [w.model_dump() for w in warnings]
+    out = [w.model_dump() for w in warnings]
+    # причины расхождений из справочника reference_values (change 011, tasks 3.1/3.2)
+    cat_rows = (await ctx.session.execute(select(ReferenceValueORM).where(
+        ReferenceValueORM.category == "deviation_reason",
+        ReferenceValueORM.workspace_id == ctx.workspace_id,
+    ))).scalars().all()
+    from src.services.reasons import attach_reason_categories
+
+    return attach_reason_categories(out, [r.value for r in cat_rows if r.value != "Причины расхождения планов заказчика и исполнителя"])
 
 
 @router.get("/plans/{plan_id}/diff")
@@ -694,26 +703,47 @@ async def team_bus_factor(team_id: str, ctx: Context = Depends(require_context))
 
 
 @router.get("/plans/{plan_id}/optimization-report")
-async def optimization_report_endpoint(plan_id: str, session: AsyncSession = Depends(get_session)) -> dict:
-    plan_orm = await get_plan_orm(session, plan_id)
+async def optimization_report_endpoint(plan_id: str, ctx: Context = Depends(require_context)) -> dict:
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
     if not plan_orm:
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
-    items = await get_plan_items(session, plan_id)
+    items = await get_plan_items(ctx.session, plan_id)
     plan = _plan_from_orm(plan_id, items)
-    tasks, engineers, history, deps = await load_world(session)
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
+    facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id == plan_id))).scalars().all()
+    initial = await _initial_plan_for(ctx.session, plan)
+    planned_sp_by_sprint = {s.sprint_no: sum(i.step_points_sp or 0.0 for i in s.items) for s in initial.sprints}
+    done_sp_by_sprint = {f.sprint_no: f.completed_sp for f in facts}
+    done_task_ids: list[str] = sorted({tid for f in facts for tid in (f.completed_task_ids or [])})
+    initial_items = [
+        {"task_id": i.task_id,
+         "parent_id": tasks[i.task_id].parent_id if i.task_id in tasks else None,
+         "step_points_sp": i.step_points_sp or 0.0,
+         "sprint_no": s.sprint_no}
+        for s in initial.sprints for i in s.items
+    ]
+    quarter_finished = len(facts) >= SPRINTS_PER_QUARTER
+    strategy_used = plan_orm.strategy or "priority"
+    baseline_plan = generate_plan(PlannerInput(list(tasks.values()), engineers, history, deps), strategy="priority")
+    from src.services.metrics import compute_metrics_initiatives
     from src.services.optimization import generate_optimization_report
 
+    metrics_report = compute_metrics_initiatives(
+        initial_items, done_task_ids, planned_sp_by_sprint, done_sp_by_sprint,
+        quarter_finished=quarter_finished,
+    ).model_dump()
+    metrics_report["strategy_used"] = strategy_used
     return generate_optimization_report(
-        plan, tasks, engineers, history, deps, strategy_used=plan_orm.strategy or "priority"
+        plan, baseline_plan, tasks, metrics_report,
     )
 
 
 @router.get("/plans/{plan_id}/staffing-suggestions")
-async def staffing_suggestions_endpoint(plan_id: str, session: AsyncSession = Depends(get_session)) -> dict:
-    plan_orm = await get_plan_orm(session, plan_id)
+async def staffing_suggestions_endpoint(plan_id: str, ctx: Context = Depends(require_context)) -> dict:
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
     if not plan_orm:
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
-    tasks, engineers, history, deps = await load_world(session)
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     from src.services.optimization import generate_staffing_suggestions
 
     suggestions = generate_staffing_suggestions(engineers, tasks)
