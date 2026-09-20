@@ -212,6 +212,8 @@ def generate_plan(
 
     # --- Порядок обычных задач по выбранной стратегии ---
     todo = [t for t in data.tasks if t.status != "Done" and t.task_id not in tasks_in_cycle and t.task_id not in pinned_tasks]
+    # блокеры со статусом Done: зависимость уже выполнена, заблокированные свободны (zásada спеки Г)
+    done_blockers = {t.task_id for t in data.tasks if t.status == "Done"}
     if strategy == "metrics":
         init_sp: dict[str, float] = defaultdict(float)
         for t in todo:
@@ -239,15 +241,14 @@ def generate_plan(
 
     remaining = list(order)
     passes = 0
-    attempted: set[str] = set()
     while remaining and passes <= SPRINTS_PER_QUARTER * 10:
         passes += 1
         progress = False
         still: list[str] = []
+        # сброс на каждый проход: иначе задачи, не сумевшие разместиться в предыдущем,
+        # навсегда выпадают из очереди, не получив ни места, ни решения (без not_planned!)
+        attempted: set[str] = set()
         for task_id in remaining:
-            if task_id in attempted:
-                continue
-            attempted.add(task_id)
             task = task_by_id[task_id]
             team = task.team_id
 
@@ -255,7 +256,7 @@ def generate_plan(
             if any(b in tasks_in_cycle for b in blockers):
                 still.append(task_id)
                 continue
-            unresolved = [b for b in blockers if b in task_by_id and b not in assigned_end]
+            unresolved = [b for b in blockers if b in task_by_id and b not in assigned_end and b not in done_blockers]
             if unresolved:
                 still.append(task_id)
                 continue
@@ -379,7 +380,7 @@ def generate_plan(
 
     for task_id in remaining:
         task = task_by_id[task_id]
-        blockers_missing = [b for b in blocked_by.get(task_id, []) if b in task_by_id and b not in assigned_end]
+        blockers_missing = [b for b in blocked_by.get(task_id, []) if b in task_by_id and b not in assigned_end and b not in done_blockers]
         reason = (
             "блокируется циклической зависимостью"
             if any(b in tasks_in_cycle for b in blocked_by.get(task_id, []))
