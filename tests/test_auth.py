@@ -7,7 +7,7 @@ from src.main import app
 
 
 @pytest.mark.asyncio
-async def test_auth_flow():
+async def test_auth_flow(auth):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # 1. Register new user
         reg_resp = await client.post(
@@ -50,7 +50,7 @@ async def test_auth_unauthorized():
 
 
 @pytest.mark.asyncio
-async def test_invalid_email_and_admin_escalation():
+async def test_invalid_email_and_admin_escalation(auth):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Invalid email format (e.g. exampletest.ru)
         bad_email = await client.post(
@@ -62,7 +62,7 @@ async def test_invalid_email_and_admin_escalation():
         # Registration requesting 'admin' role should be constrained to 'editor'
         admin_req = await client.post(
             "/auth/register",
-            json={"email": "hacker@domain.com", "password": "secure_password_123", "role": "admin"},
+            json={"email": f"hacker_{random.randint(1, 10**9)}@domain.com", "password": "secure_password_123", "role": "admin"},
         )
         assert admin_req.status_code == 201
         assert admin_req.json()["user"]["role"] == "editor"
