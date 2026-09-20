@@ -135,8 +135,8 @@ export const StarMapCanvas = forwardRef<StarMapHandle, Props>(function StarMapCa
       labelFont: LABEL_FONT,
       labelSize: 11,
       labelWeight: '500',
-      labelDensity: 0.9,
-      labelGridCellSize: 70,
+      labelDensity: 0.6,
+      labelGridCellSize: 110,
       labelRenderedSizeThreshold: 3,
       zIndex: true,
       minCameraRatio: 0.12,
@@ -445,17 +445,22 @@ export const StarMapCanvas = forwardRef<StarMapHandle, Props>(function StarMapCa
 
   return (
     <div className="starmap__canvas" ref={containerRef}>
-      {hover && <HoverCard graph={graph} info={hover} />}
+      {hover && <HoverCard graph={graph} info={hover} bounds={{ w: containerRef.current?.clientWidth ?? Infinity, h: containerRef.current?.clientHeight ?? Infinity }} />}
     </div>
   )
 })
 
 /** Карточка при наведении. Дублирует данные панели — никогда не единственный источник информации. */
-function HoverCard({ graph, info }: { graph: StarGraph; info: NonNullable<HoverInfo> }) {
+function HoverCard({ graph, info, bounds }: { graph: StarGraph; info: NonNullable<HoverInfo>; bounds: { w: number; h: number } }) {
   if (!graph.hasNode(info.node)) return null
   const a = graph.getNodeAttributes(info.node)
+  // У края холста карточка открывается в другую сторону от курсора — не обрезается
+  const flipX = info.x + 16 + 280 > bounds.w
+  const flipY = info.y + 12 + 130 > bounds.h
+  const x = Math.round(flipX ? info.x - 16 : info.x + 16)
+  const y = Math.round(flipY ? info.y - 12 : info.y + 12)
   return (
-    <div className="starmap__tip" style={{ transform: `translate(${Math.round(info.x + 16)}px, ${Math.round(info.y + 12)}px)` }} role="tooltip">
+    <div className="starmap__tip" style={{ transform: `translate(${x}px, ${y}px) translate(${flipX ? '-100%' : '0'}, ${flipY ? '-100%' : '0'})` }} role="tooltip">
       {a.kind === 'person' ? (
         <>
           <div className="starmap__tip-title">

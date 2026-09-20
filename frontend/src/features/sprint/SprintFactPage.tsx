@@ -196,7 +196,7 @@ function FactForm({ planId, sprintNo, tasks, isNext, onDone }: FormProps) {
       await submit.mutateAsync({ sprintNo, body: { completed_sp: doneSp, completed_task_ids: [...done], notes } })
       setConfirmOpen(false)
       onDone()
-      toast.success(`Факт спринта ${sprintNo} загружен`, { description: 'Спринты пересчитаны — итоги вверху страницы.' })
+      toast.success(`Факт спринта ${sprintNo} загружен, план пересчитан`)
     } catch (e) {
       setConfirmOpen(false)
       toast.error(errorTitle(e), { description: errorHint(e) })
@@ -266,18 +266,20 @@ function FactForm({ planId, sprintNo, tasks, isNext, onDone }: FormProps) {
         </div>
       )}
 
-      <div className="block__body" style={{ display: 'grid', gap: 'var(--s-3)' }}>
+      <div className="block__body">
         <Field label="Комментарий" hint="Необязательно: что помешало, что взяли сверх плана">
           <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <span className="muted tabular" style={{ fontSize: 'var(--text-sm)' }}>
-            Выполнено {done.size} из {rows.length} · не выполнено {notDone.length}
-          </span>
-          <Button variant="primary" icon={<CheckCircle2 />} onClick={() => setConfirmOpen(true)}>
-            Загрузить факт
-          </Button>
-        </div>
+      </div>
+
+      {/* Действие всегда на виду: панель прилипает к низу экрана, пока таблица длиннее окна */}
+      <div className="fact-bar">
+        <span className="tabular">
+          Отмечено <b>{done.size}</b> из {rows.length} · <b>{fmt(doneSp)}</b> из {fmt(plannedSp)} SP
+        </span>
+        <Button variant="primary" icon={<CheckCircle2 />} onClick={() => setConfirmOpen(true)}>
+          Загрузить факт
+        </Button>
       </div>
 
       <ConfirmDialog
@@ -285,10 +287,17 @@ function FactForm({ planId, sprintNo, tasks, isNext, onDone }: FormProps) {
         onOpenChange={setConfirmOpen}
         title={`Загрузить факт спринта ${sprintNo}?`}
         description="Изменить факт после загрузки нельзя."
-        confirmLabel="Загрузить и пересчитать"
+        confirmLabel={done.size === 0 && rows.length > 0 ? 'Да, ничего не выполнено' : 'Загрузить и пересчитать'}
+        tone={done.size === 0 && rows.length > 0 ? 'danger' : 'primary'}
         loading={submit.isPending}
         onConfirm={send}
       >
+        {done.size === 0 && rows.length > 0 && (
+          <div className="callout" data-tone="over" style={{ marginBottom: 'var(--s-3)' }}>
+            <div className="callout__title">Не отмечено ни одной задачи</div>
+            <p>Все {rows.length} {plural(rows.length, 'задача', 'задачи', 'задач')} спринта вернутся в планирование. Если вы просто забыли отметить выполненное — нажмите «Отмена».</p>
+          </div>
+        )}
         <ul className="list-plain">
           <li>
             Выполнено: <strong className="tabular">{done.size}</strong> {plural(done.size, 'задача', 'задачи', 'задач')}, {fmt(doneSp)} из {fmt(plannedSp)} SP.

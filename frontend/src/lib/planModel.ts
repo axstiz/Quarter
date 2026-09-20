@@ -115,6 +115,9 @@ export function buildPlanModel(plan: Plan, tasksInfo: TaskInfo[]): PlanModel {
   return { sprints, outside, tasks }
 }
 
+/** Задача влезла в квартал не целиком: остаток за 12-й неделей (причина от планировщика). */
+export const isPartial = (task: TaskSummary) => [task.reason, ...task.rows.map((r) => r.reason)].some((r) => r?.includes('частично'))
+
 /** «1», «1–2», «2, 4» */
 export function formatSprints(list: number[]) {
   if (!list.length) return '—'

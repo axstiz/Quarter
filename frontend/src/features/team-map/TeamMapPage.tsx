@@ -39,10 +39,12 @@ export function TeamMapPage() {
     setPerson(id)
   }
   const people = new Set(summary.data?.teams.flatMap((x) => x.engineers.map((e) => e.engineer_id)))
-  const risky = bus.data?.items.filter((i) => i.scope_type === 'company' && i.factor <= 1).length
+  // Критичные по онбордингу: Bus Factor 1 у компетенции, которая нужна задачам плана
+  const risky = bus.data?.items.filter((i) => i.scope_type === 'company' && i.factor <= 1 && (roleDemand.get(`company|${i.key}`)?.length ?? 0) > 0).length
+  const overlay = current === 'map'
 
   return (
-    <div className="page" data-panel={person || comp ? 'open' : 'closed'}>
+    <div className="page" data-panel={(person || comp) && !overlay ? 'open' : 'closed'}>
       <div className="content">
         <div className="page-head">
           <div>
@@ -87,6 +89,7 @@ export function TeamMapPage() {
       </div>
 
       <Panel
+        overlay={overlay}
         contentKey={person ?? comp}
         onClose={() => {
           setPerson(null)

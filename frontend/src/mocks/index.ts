@@ -110,6 +110,9 @@ const on = (method: string, pattern: string, h: Handler) => routes.push([method,
 // --- онбординг ---
 const snapshot = ({ polls: _p, ...job }: MockJob): UploadJob => job
 
+// Мок стартует в состоянии «после импорта»; повтор импорта планы не трогает (как бэк после fix-import-preserves-plans)
+on('POST', '/data/import', () => ({ status: 'imported', counts: DATASET_CONFIRM_COUNTS }))
+
 on('POST', '/data/upload', (_p, body) => {
   const file = body instanceof FormData ? (body.get('file') as File | null) : null
   const name = file?.name ?? 'upload'

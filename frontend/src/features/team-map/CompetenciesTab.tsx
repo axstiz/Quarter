@@ -16,7 +16,9 @@ export function CompetenciesTab({ report, summary, roleDemand, hasPlan, onSelect
   const scopeId = scope ?? 'company'
   const teams = summary.teams.map((x) => x.team_id).sort()
   const roleKeys = useMemo(() => new Set(summary.teams.flatMap((x) => x.engineers.map((e) => e.role.toLowerCase()))), [summary])
-  const limit = maxFactor === null ? 1 : Number(maxFactor) || Infinity
+  // По умолчанию — критичные (онбординг: «Bus Factor > 1 для всех критических технологий»): носитель один и роль нужна задачам плана
+  const critical = maxFactor === null
+  const limit = critical ? 1 : Number(maxFactor) || Infinity
   const query = (q ?? '').toLowerCase()
 
   const rows = report.items
@@ -25,21 +27,12 @@ export function CompetenciesTab({ report, summary, roleDemand, hasPlan, onSelect
     .filter((i) => i.factor <= limit)
     .filter((i) => !query || i.key.includes(query))
     .map((i) => ({ ...i, demand: roleDemand.get(`${i.scope_type === 'company' ? 'company' : i.scope_id}|${i.key}`) ?? [] }))
+    .filter((i) => !critical || i.demand.length > 0)
     // Сначала то, что грозит плану: больше задач под угрозой → меньше носителей → роли раньше навыков
     .sort((a, b) => b.demand.length - a.demand.length || a.factor - b.factor || Number(roleKeys.has(b.key)) - Number(roleKeys.has(a.key)) || a.key.localeCompare(b.key))
 
   return (
     <>
-      <div className="callout" data-tone="plan" style={{ marginTop: 'var(--s-3)' }}>
-        <div className="callout__title">
-          <Info aria-hidden /> Методика · область: {scopeId === 'company' ? 'вся компания' : `команда ${scopeId}`}
-        </div>
-        <p>{report.methodology}</p>
-        <p>
-          Колонка «Задач плана» — сколько незакрытых задач {hasPlan ? 'текущего плана' : '(плана пока нет)'} требуют роль; навыки к задачам в данных не привязаны.
-        </p>
-      </div>
-
       <div className="toolbar">
         <SearchInput placeholder="Компетенция или роль" value={q ?? ''} onChange={(e) => setQ(e.target.value)} style={{ width: 220 }} aria-label="Поиск компетенции" />
         <Select aria-label="Область" value={scopeId} onChange={(e) => setScope(e.target.value === 'company' ? null : e.target.value)} options={[{ value: 'company', label: 'Вся компания' }, ...teams.map((x) => ({ value: x, label: `Команда ${x}` }))]} />
@@ -55,10 +48,11 @@ export function CompetenciesTab({ report, summary, roleDemand, hasPlan, onSelect
         />
         <Select
           aria-label="Bus Factor"
-          value={maxFactor ?? '1'}
-          onChange={(e) => setMaxFactor(e.target.value === '1' ? null : e.target.value)}
+          value={maxFactor ?? 'critical'}
+          onChange={(e) => setMaxFactor(e.target.value === 'critical' ? null : e.target.value)}
           options={[
-            { value: '1', label: 'Bus Factor ≤ 1 (риск)' },
+            { value: 'critical', label: 'Критичные: 1 носитель и нужны плану' },
+            { value: '1', label: 'Bus Factor ≤ 1' },
             { value: '2', label: 'Bus Factor ≤ 2' },
             { value: 'all', label: 'Все' },
           ]}
@@ -68,7 +62,21 @@ export function CompetenciesTab({ report, summary, roleDemand, hasPlan, onSelect
         </span>
       </div>
 
-      <div className="block scroll-x">
+      <div className="block">
+        {/* Методика рядом с показателем (спека ui): коротко всегда видна, полный текст — раскрытием */}
+        <div className="bf-method">
+          <Info aria-hidden />
+          <div>
+            <b>Bus Factor = число носителей компетенции · область: {scopeId === 'company' ? 'вся компания' : `команда ${scopeId}`}.</b>{' '}
+            Риск — при 1 носителе; красным отмечены только компетенции, которые нужны задачам {hasPlan ? 'текущего плана' : 'плана (плана пока нет)'}.
+            <details>
+              <summary>Полная методика</summary>
+              <p>{report.methodology}</p>
+              <p>Колонка «Задач плана» — сколько незакрытых задач плана требуют роль; навыки к задачам в данных не привязаны, поэтому для навыков задач нет.</p>
+            </details>
+          </div>
+        </div>
+        <div className="scroll-x">
         <table className="table table--compact">
           <thead>
             <tr>
@@ -85,7 +93,7 @@ export function CompetenciesTab({ report, summary, roleDemand, hasPlan, onSelect
                 <td style={{ fontWeight: 500 }}>{i.key}</td>
                 <td className="muted">{roleKeys.has(i.key) ? 'роль' : 'навык'}</td>
                 <td className="num">
-                  <Badge plain tone={i.factor <= 1 ? 'over' : i.factor === 2 ? 'shift' : 'done'}>
+                  <Badge plain tone={i.factor <= 1 ? (i.demand.length ? 'over' : 'neutral') : i.factor === 2 ? 'shift' : 'done'}>
                     <span className="tabular">{i.factor}</span>
                   </Badge>
                 </td>
@@ -111,6 +119,7 @@ export function CompetenciesTab({ report, summary, roleDemand, hasPlan, onSelect
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </>
   )

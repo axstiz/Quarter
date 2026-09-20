@@ -142,7 +142,7 @@ export function PeopleTab({ summary, busFactor, selected, onSelect }: { summary:
                       <td style={{ minWidth: 220, fontSize: 'var(--text-xs)', color: 'var(--ink-2)' }}>
                         {main?.skills_declared}
                         {singles && (
-                          <div className="risk">
+                          <div className="risk risk--quiet">
                             <ShieldAlert aria-hidden /> единственный: {singles.slice(0, 3).join(', ')}
                             {singles.length > 3 && ` и ещё ${singles.length - 3}`}
                           </div>

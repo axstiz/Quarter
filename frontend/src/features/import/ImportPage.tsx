@@ -53,9 +53,20 @@ export function ImportPage() {
     onError: (e) => toast.error(errorTitle(e), { description: errorHint(e) }),
   })
 
+  const demo = useMutation({
+    mutationFn: api.importDemo,
+    onSuccess: (r) => {
+      setResult({ status: 'confirmed', counts: r.counts })
+      qc.invalidateQueries()
+      toast.success('Демо-датасет импортирован')
+    },
+    onError: (e) => toast.error(errorTitle(e), { description: errorHint(e) }),
+  })
+
   const data: UploadJob | undefined = job.data ?? upload.data
   const step = result ? 3 : !data ? 0 : data.status === 'ready' ? 2 : 1
   const restart = () => {
+    demo.reset()
     upload.reset()
     confirm.reset()
     setJobId(null)
@@ -97,7 +108,19 @@ export function ImportPage() {
               <p style={{ margin: 0 }}>Импорт требует роли редактора или администратора. Выполните демо-вход с этой ролью на экране входа.</p>
             </div>
           ) : !data ? (
-            <Dropzone loading={upload.isPending} error={upload.error} onFile={(f) => upload.mutate(f)} />
+            <div style={{ display: 'grid', gap: 'var(--s-4)' }}>
+              <div className="block demo-import">
+                <div>
+                  <h2>Датасет организаторов</h2>
+                  <p className="muted">Задачи, инженеры, зависимости и история команд из условия задачи — без сопоставления колонок.</p>
+                </div>
+                <Button variant="primary" loading={demo.isPending} onClick={() => demo.mutate()}>
+                  Импортировать демо-датасет
+                </Button>
+              </div>
+              <div className="or-divider"><span>или свой файл</span></div>
+              <Dropzone loading={upload.isPending} error={upload.error} onFile={(f) => upload.mutate(f)} />
+            </div>
           ) : (
             <div style={{ display: 'grid', gap: 'var(--s-4)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>

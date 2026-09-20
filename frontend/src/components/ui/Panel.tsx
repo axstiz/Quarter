@@ -12,13 +12,15 @@ interface Props {
   title?: ReactNode
   onClose: () => void
   children?: ReactNode
+  /** Поверх контента, без сдвига: для сеток, которые при сжатии теряют читаемость */
+  overlay?: boolean
 }
 
 /**
  * Панель деталей справа. На широком экране сдвигает контент (без затемнения),
  * на узком — ложится поверх с подложкой. Вход 260 мс, выход быстрее — 180 мс.
  */
-export function Panel({ contentKey, eyebrow, title, onClose, children }: Props) {
+export function Panel({ contentKey, eyebrow, title, onClose, children, overlay }: Props) {
   const open = contentKey !== null
 
   useEffect(() => {
@@ -39,7 +41,7 @@ export function Panel({ contentKey, eyebrow, title, onClose, children }: Props) 
           <motion.div key="scrim" className="panel-scrim" onClick={onClose} initial={{ opacity: 0 }} animate={{ opacity: 1, transition: t.base }} exit={{ opacity: 0, transition: t.fast }} />
           <motion.aside
             key="panel"
-            className="panel"
+            className={overlay ? 'panel panel--overlay' : 'panel'}
             aria-label="Подробности"
             initial={{ transform: 'translateX(100%)' }}
             animate={{ transform: 'translateX(0%)', transition: t.panelIn }}
