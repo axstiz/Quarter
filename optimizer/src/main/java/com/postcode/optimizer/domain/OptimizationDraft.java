@@ -21,6 +21,21 @@ public class OptimizationDraft {
     @ProblemFactCollectionProperty
     private List<String> teamIds;
 
+    @ProblemFactCollectionProperty
+    private List<ProjectTask> tasks;
+
+    @ProblemFactCollectionProperty
+    private List<TaskDependency> dependencies;
+
+    @ProblemFactCollectionProperty
+    private List<Engineer> engineers;
+
+    @ProblemFactCollectionProperty
+    private List<RoleCapacity> roleCapacities;
+
+    @ProblemFactCollectionProperty
+    private List<TeamVelocity> teamVelocities;
+
     @PlanningEntityCollectionProperty
     private List<TaskPartAssignment> assignments;
 
@@ -33,10 +48,17 @@ public class OptimizationDraft {
     public OptimizationDraft() {
     }
 
-    public OptimizationDraft(List<Integer> sprints, List<String> teamIds,
+    public OptimizationDraft(List<Integer> sprints, List<String> teamIds, List<ProjectTask> tasks,
+                             List<TaskDependency> dependencies, List<Engineer> engineers,
+                             List<RoleCapacity> roleCapacities, List<TeamVelocity> teamVelocities,
                              List<TaskPartAssignment> assignments, List<StaffingMove> staffingMoves) {
         this.sprints = sprints;
         this.teamIds = teamIds;
+        this.tasks = tasks;
+        this.dependencies = dependencies;
+        this.engineers = engineers;
+        this.roleCapacities = roleCapacities;
+        this.teamVelocities = teamVelocities;
         this.assignments = assignments;
         this.staffingMoves = staffingMoves;
     }
@@ -47,6 +69,26 @@ public class OptimizationDraft {
 
     public List<String> getTeamIds() {
         return teamIds;
+    }
+
+    public List<ProjectTask> getTasks() {
+        return tasks;
+    }
+
+    public List<TaskDependency> getDependencies() {
+        return dependencies;
+    }
+
+    public List<Engineer> getEngineers() {
+        return engineers;
+    }
+
+    public List<RoleCapacity> getRoleCapacities() {
+        return roleCapacities;
+    }
+
+    public List<TeamVelocity> getTeamVelocities() {
+        return teamVelocities;
     }
 
     public List<TaskPartAssignment> getAssignments() {
