@@ -100,10 +100,10 @@
  * Ритм страницы: любые два соседних блока верхнего уровня разделены одинаково,
  * независимо от того, в каком порядке их собрал компонент. Отступы не задаются вручную в местах использования.
  */
-.content > :where(.stats, .tabs, .toolbar, .groups, .block, .section, .callout, .alert, .split, .steps, .empty) + :where(.stats, .tabs, .toolbar, .groups, .block, .section, .callout, .alert, .split, .steps, .empty) {
+.content > :where(.stats, .tabs, .toolbar, .block, .section, .callout, .alert, .split, .steps, .empty) + :where(.stats, .tabs, .toolbar, .block, .section, .callout, .alert, .split, .steps, .empty) {
   margin-top: var(--s-6);
 }
-.content > .tabs + .toolbar, .content > .tabs + .groups, .content > .tabs + .split, .content > .toolbar + .groups { margin-top: var(--s-3); }
+.content > .tabs + .toolbar, .content > .tabs + .split { margin-top: var(--s-3); }
 .content > .section + .section { margin-top: var(--s-8); }
 .section__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-2); }
 .section__hint { font-size: var(--text-xs); color: var(--ink-3); }

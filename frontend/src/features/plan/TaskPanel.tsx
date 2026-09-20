@@ -10,7 +10,9 @@ import { errorHint, errorTitle } from '@/components/ui/States'
 import { fmt } from '@/lib/format'
 import { formatSprints, type PlanModel } from '@/lib/planModel'
 import { companyRoleHolders } from './busRisk'
-import { fmtSp } from './SprintsView'
+
+/** Часть задачи может получить < 0,05 SP (часы легли, SP округлились) — «0» здесь вводит в заблуждение */
+const fmtSp = (sp: number | null) => (sp !== null && sp > 0 && sp < 0.05 ? '<0,1' : sp === 0 ? '<0,1' : fmt(sp))
 
 interface Props {
   model: PlanModel
