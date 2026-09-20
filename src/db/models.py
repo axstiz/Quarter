@@ -127,6 +127,7 @@ class PlanORM(Base):
     created_by: Mapped[str] = mapped_column(String, default="system", index=True)
     quarter_start: Mapped[date | None] = mapped_column(Date, nullable=True)
     sprint_length_days: Mapped[int] = mapped_column(Integer, default=14)
+    strategy: Mapped[str] = mapped_column(String, default="priority")
 
 
 class PlanItemORM(Base):

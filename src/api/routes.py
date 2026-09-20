@@ -141,15 +141,20 @@ async def get_plan_items(session, plan_id: str) -> list[PlanItemORM]:
 
 @router.post("/plans/generate", status_code=201)
 async def generate_plan_endpoint(
+    body: dict | None = None,
     ctx: Context = Depends(require_permission("plans_generate")),
 ) -> dict:
     workspace_id = ctx.workspace_id
+    strategy = (body or {}).get("strategy", "priority")
+    if strategy not in ("priority", "metrics"):
+        raise HTTPException(status_code=422, detail=f"неизвестная стратегия: {strategy}")
+
     tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=workspace_id)
     if not tasks:
         raise HTTPException(status_code=400, detail="нет данных в базе; сначала POST /api/v1/data/import")
-    plan = generate_plan(PlannerInput(list(tasks.values()), engineers, history, deps))
+    plan = generate_plan(PlannerInput(list(tasks.values()), engineers, history, deps), strategy=strategy)
     q_start = calculate_quarter_start(list(tasks.values()))
-    plan_orm = PlanORM(workspace_id=workspace_id, is_initial=True, quarter_start=q_start, sprint_length_days=14, created_by=ctx.user.id)
+    plan_orm = PlanORM(workspace_id=workspace_id, is_initial=True, quarter_start=q_start, sprint_length_days=14, created_by=ctx.user.id, strategy=strategy)
     ctx.session.add(plan_orm)
     await ctx.session.flush()
     for sprint in plan.sprints:
@@ -173,7 +178,7 @@ async def generate_plan_endpoint(
             reason=d.reason,
         ))
     await ctx.session.commit()
-    return {"plan_id": plan_orm.plan_id, "sprints": {str(s.sprint_no): [i.task_id for i in sorted(
+    return {"plan_id": plan_orm.plan_id, "strategy": strategy, "sprints": {str(s.sprint_no): [i.task_id for i in sorted(
         s.items, key=lambda x: x.task_id)] for s in plan.sprints}}
 
 
@@ -686,6 +691,33 @@ async def team_bus_factor(team_id: str, ctx: Context = Depends(require_context))
 
     report = compute_bus_factor(engineers, scope_type="team", scope_id=team_id)
     return report.model_dump()
+
+
+@router.get("/plans/{plan_id}/optimization-report")
+async def optimization_report_endpoint(plan_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+    plan_orm = await get_plan_orm(session, plan_id)
+    if not plan_orm:
+        raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
+    items = await get_plan_items(session, plan_id)
+    plan = _plan_from_orm(plan_id, items)
+    tasks, engineers, history, deps = await load_world(session)
+    from src.services.optimization import generate_optimization_report
+
+    return generate_optimization_report(
+        plan, tasks, engineers, history, deps, strategy_used=plan_orm.strategy or "priority"
+    )
+
+
+@router.get("/plans/{plan_id}/staffing-suggestions")
+async def staffing_suggestions_endpoint(plan_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+    plan_orm = await get_plan_orm(session, plan_id)
+    if not plan_orm:
+        raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
+    tasks, engineers, history, deps = await load_world(session)
+    from src.services.optimization import generate_staffing_suggestions
+
+    suggestions = generate_staffing_suggestions(engineers, tasks)
+    return {"plan_id": plan_id, "suggestions": suggestions}
 
 
 @router.get("/star-map/summary")

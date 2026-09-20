@@ -90,7 +90,7 @@ def _put_hours(role: str, hours: float, sprint: int,
     return placed
 
 
-def generate_plan(data: PlannerInput, first_free_sprint: int = 1) -> Plan:
+def generate_plan(data: PlannerInput, first_free_sprint: int = 1, strategy: str = "priority") -> Plan:
     task_by_id = {t.task_id: t for t in data.tasks}
     tasks_in_cycle = set(find_cycle(data.deps, list(task_by_id)))
 
@@ -107,9 +107,24 @@ def generate_plan(data: PlannerInput, first_free_sprint: int = 1) -> Plan:
         eng_limits[vid] = HOURS_PER_SPRINT_FULL
         eng_roles[vid].add(role)
 
-    # --- порядок задач: priority (меньше — раньше), потом исходный порядок ---
+    # --- порядок задач по выбранной стратегии ---
     todo = [t for t in data.tasks if t.status != "Done" and t.task_id not in tasks_in_cycle]
-    todo_sorted = sorted(todo, key=lambda t: (float(getattr(t, "priority", 100)), t.task_id))
+    if strategy == "metrics":
+        init_sp: dict[str, float] = defaultdict(float)
+        for t in todo:
+            pid = t.parent_id or "NONE"
+            init_sp[pid] += t.estimation_sp
+
+        def _metric_key(t: Task):
+            is_cust = 0 if (getattr(t, "planned_in_sprint", False) or float(getattr(t, "priority", 100)) <= 10) else 1
+            pid = t.parent_id or "NONE"
+            sp_rem = init_sp[pid]
+            return (is_cust, sp_rem, float(getattr(t, "priority", 100)), t.task_id)
+
+        todo_sorted = sorted(todo, key=_metric_key)
+    else:
+        todo_sorted = sorted(todo, key=lambda t: (float(getattr(t, "priority", 100)), t.task_id))
+
     order = topo_order([t.task_id for t in todo_sorted], data.deps)
     if order is None:
         order = [t.task_id for t in todo_sorted]
@@ -212,14 +227,20 @@ def generate_plan(data: PlannerInput, first_free_sprint: int = 1) -> Plan:
                 sp_left[sprint][team] = left_sp - put_sp
                 sp_to_place = round(sp_to_place - put_sp, 2)
                 placed_hh_total += placed_hh
+
+                r_text = (
+                    "разбита между спринтами" if first_sprint is not None and first_sprint < sprint
+                    else ("просрочена (overdue)" if overdue and first_sprint is None else "")
+                )
+                if strategy == "metrics":
+                    st_text = f"метрическая стратегия: инициатива {task.parent_id}" if task.parent_id else "метрическая стратегия: приоритет заказчика"
+                    r_text = (r_text + "; " + st_text).strip("; ")
+
                 plan.sprints[sprint - first_free_sprint].items.append(PlanItem(
                     task_id=task_id,
                     decision=PlanDecision.planned,
                     sprint_no=sprint,
-                    reason=(
-                        "разбита между спринтами" if first_sprint is not None and first_sprint < sprint
-                        else ("просрочена (overdue)" if overdue and first_sprint is None else "")
-                    ),
+                    reason=r_text,
                     step_points_sp=put_sp,
                 ))
                 if first_sprint is None:
