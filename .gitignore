@@ -4,6 +4,7 @@ __pycache__/
 .openspec-cache/
 node_modules/
 optimizer/target/
+optimizer/dependency-reduced-pom.xml
 
 **.db
 **.db-journal
