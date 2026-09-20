@@ -7,6 +7,7 @@ import ai.timefold.solver.core.api.score.stream.ConstraintFactory;
 import ai.timefold.solver.core.api.score.stream.ConstraintProvider;
 import ai.timefold.solver.core.api.score.stream.Joiners;
 import com.postcode.optimizer.domain.Engineer;
+import com.postcode.optimizer.domain.ProjectTask;
 import com.postcode.optimizer.domain.RoleCapacity;
 import com.postcode.optimizer.domain.StaffingMove;
 import com.postcode.optimizer.domain.TaskDependency;
@@ -47,51 +48,85 @@ public class OptimizationConstraintProvider implements ConstraintProvider {
         };
     }
 
-    /** ЗАГЛУШКА (RED). */
+    /** (1) Целевая функция: награда за каждую инициативу (parentId), полностью размещённую в спринтах. */
     Constraint initiativeCompletedReward(ConstraintFactory factory) {
-        return factory.forEach(TaskPartAssignment.class)
-                .filter(a -> false)
-                .penalize(HardSoftScore.ONE_SOFT)
+        return factory.forEach(ProjectTask.class)
+                .ifExists(TaskPartAssignment.class,
+                        Joiners.equal(ProjectTask::getTaskId, TaskPartAssignment::getTaskId))
+                .ifNotExists(TaskPartAssignment.class,
+                        Joiners.equal(ProjectTask::getTaskId, TaskPartAssignment::getTaskId),
+                        Joiners.filtering((task, part) -> part.getSprint() == null))
+                .groupBy(ProjectTask::getParentId, ConstraintCollectors.countDistinct(ProjectTask::getTaskId))
+                .join(factory.forEach(ProjectTask.class).groupBy(ProjectTask::getParentId, ConstraintCollectors.countDistinct(ProjectTask::getTaskId))
+                                .map(ParentCount::of),
+                        Joiners.equal((parentId, placed) -> parentId, ParentCount::parent))
+                .filter((parentId, placed, total) -> parentId != null && placed == total.total())
+                .reward(HardSoftScore.ONE_SOFT, (parentId, placed, total) -> WEIGHT_INITIATIVE)
                 .asConstraint("initiativeCompletedReward");
     }
 
-    /** ЗАГЛУШКА (RED). */
+    /** (2) Целевая функция: награда за запланированные SP стратегических задач заказчика (planned_in_sprint = Да). */
     Constraint strategicSpReward(ConstraintFactory factory) {
         return factory.forEach(TaskPartAssignment.class)
-                .filter(a -> false)
-                .penalize(HardSoftScore.ONE_SOFT)
+                .filter(a -> a.getSprint() != null)
+                .join(ProjectTask.class,
+                        Joiners.equal(TaskPartAssignment::getTaskId, ProjectTask::getTaskId))
+                .filter((a, task) -> task.isPlannedInSprint())
+                .reward(HardSoftScore.ONE_SOFT,
+                        (a, task) -> Math.round(a.getStoryPoints() * WEIGHT_STRATEGIC_SP))
                 .asConstraint("strategicSpReward");
     }
 
-    /** ЗАГЛУШКА (RED). */
+    /** (3) Целевая функция (PI-норма): недогруженная ниже PI_MIN_UTILIZATION команда-спринт штрафуется. */
     Constraint teamUtilizationPenalty(ConstraintFactory factory) {
         return factory.forEach(TaskPartAssignment.class)
-                .filter(a -> false)
-                .penalize(HardSoftScore.ONE_SOFT)
+                .filter(a -> a.getSprint() != null)
+                .groupBy(
+                        TaskPartAssignment::getTeamId,
+                        TaskPartAssignment::getSprint,
+                        ConstraintCollectors.sum(a -> Math.round(a.getStoryPoints())))
+                .join(TeamVelocity.class,
+                        Joiners.equal((teamId, sprintId, sp) -> teamId, TeamVelocity::getTeamId))
+                .filter((teamId, sprintId, sp, velocity) -> sp < Math.round(PI_MIN_UTILIZATION * velocity.getPlannedSp()))
+                .penalize(HardSoftScore.ONE_SOFT,
+                        (teamId, sprintId, sp, velocity) -> (Math.round(PI_MIN_UTILIZATION * velocity.getPlannedSp()) - sp)
+                                * WEIGHT_UTILIZATION)
                 .asConstraint("teamUtilizationPenalty");
     }
 
-    /** ЗАГЛУШКА (RED). */
+    /** Tie-break: штраф за незакрытые человеко-часы частей, не размещённых в спринтах. */
     Constraint unclosedRoleHoursPenalty(ConstraintFactory factory) {
-        return factory.forEach(TaskPartAssignment.class)
-                .filter(a -> false)
-                .penalize(HardSoftScore.ONE_SOFT)
+        return factory.forEachIncludingUnassigned(TaskPartAssignment.class)
+                .filter(a -> a.getSprint() == null)
+                .join(ProjectTask.class,
+                        Joiners.equal(TaskPartAssignment::getTaskId, ProjectTask::getTaskId))
+                .penalize(HardSoftScore.ONE_SOFT,
+                        (a, task) -> Math.round(task.getEstimatedHh() * WEIGHT_UNCLOSED_HH))
                 .asConstraint("unclosedRoleHoursPenalty");
     }
 
-    /** ЗАГЛУШКА (RED). */
+    /** Tie-break (тяжёлый штраф): любой реальный перенос инженера между командами. */
     Constraint staffingMovePenalty(ConstraintFactory factory) {
         return factory.forEach(StaffingMove.class)
-                .filter(move -> false)
-                .penalize(HardSoftScore.ONE_SOFT)
+                .filter(move -> move.getToTeamId() != null && !move.getToTeamId().equals(move.getFromTeamId()))
+                .penalize(HardSoftScore.ONE_SOFT, move -> WEIGHT_MOVE)
                 .asConstraint("staffingMovePenalty");
     }
 
-    /** ЗАГЛУШКА (RED). */
+    /** Tie-break: нарушение порядка human priority — задача с меньшим priority должна стартовать раньше. */
     Constraint priorityOrderPenalty(ConstraintFactory factory) {
         return factory.forEach(TaskPartAssignment.class)
-                .filter(a -> false)
-                .penalize(HardSoftScore.ONE_SOFT)
+                .filter(a -> a.getSprint() != null)
+                .join(ProjectTask.class,
+                        Joiners.equal(TaskPartAssignment::getTaskId, ProjectTask::getTaskId))
+                .join(TaskPartAssignment.class,
+                        Joiners.equal((a, taskA) -> a.getTeamId(), TaskPartAssignment::getTeamId),
+                        Joiners.filtering((a, taskA, b) -> b.getSprint() != null && a.getSprint() < b.getSprint()))
+                .join(ProjectTask.class,
+                        Joiners.equal((a, taskA, b) -> b.getTaskId(), ProjectTask::getTaskId))
+                .filter((a, taskA, b, taskB) -> taskA.getPriority() > taskB.getPriority())
+                .penalize(HardSoftScore.ONE_SOFT,
+                        (a, taskA, b, taskB) -> (taskA.getPriority() - taskB.getPriority()) * WEIGHT_PRIORITY)
                 .asConstraint("priorityOrderPenalty");
     }
 
@@ -160,5 +195,12 @@ public class OptimizationConstraintProvider implements ConstraintProvider {
     }
 
     private record RoleLoads(Integer sprint, List<RoleLoad> loads) {
+    }
+
+    private record ParentCount(String parent, long total) {
+
+        static ParentCount of(String parent, Long total) {
+            return new ParentCount(parent, total);
+        }
     }
 }

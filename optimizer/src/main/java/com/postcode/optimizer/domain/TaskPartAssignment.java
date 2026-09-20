@@ -17,7 +17,7 @@ public class TaskPartAssignment {
     private double storyPoints;
     private Map<String, Double> roleHours;
 
-    @PlanningVariable(valueRangeProviderRefs = "sprintRange")
+    @PlanningVariable(valueRangeProviderRefs = "sprintRange", allowsUnassigned = true)
     private Integer sprint;
 
     @PlanningVariable(valueRangeProviderRefs = "teamRange")
