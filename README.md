@@ -4,7 +4,26 @@
 
 ## Быстрый старт
 
-Требования: [uv](https://docs.astral.sh/uv/) (/manage управляет Python сам), Node.js 22+ (для openspec).
+Требования: **docker** — для связки одной командой; без него [uv](https://docs.astral.sh/uv/) + Node.js 22 (для openspec и локального фронта).
+
+### Связка одной командой (docker)
+
+```bash
+docker compose up -d --build
+# http://localhost:5173 → /login → демо-роль (reader/editor/admin) → весь сценарий
+# Swagger: http://localhost:8000/docs
+```
+
+Поднимаются: `db` (PostgreSQL 16) + `api` (uvicorn, dataset внутри образа — импорт демо-датасета работает сразу) +
+`frontend` (nginx + статика, проксирует `/api`, `/auth`, `/workspaces`, `/permissions` на api).
+
+Профили: `--profile jobs` — Redis + arq-воркер фоновых джобов (change 007); профиль `optimizer`
+(Timefold-сайдкар, change 018) появится с влитием 018.
+
+Пересоздать данные: `POST /api/v1/data/import` (демо-датасет уже в образе). Старый `pgdata`
+с прошлой схемой лучше пересоздать: `docker compose down && docker volume rm <project>_pgdata`.
+
+### Локально (uv)
 
 ```bash
 # окружение + зависимости (Python 3.13)

@@ -33,5 +33,29 @@ services:
       POSTCODE_REDIS_URL: redis://redis:6379/0
       POSTCODE_JOBS_MODE: queue
 
+  # change 004+ : связка сервисом — бэк и фронт в контейнерах
+  # (docker compose up — поднимает всё: db + api + frontend)
+  api:
+    build:
+      context: .
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      POSTCODE_DATABASE_URL: postgresql+asyncpg://postcode:postcode@db:5432/postcode
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "5173:80"
+    restart: unless-stopped
+
 volumes:
   pgdata:
