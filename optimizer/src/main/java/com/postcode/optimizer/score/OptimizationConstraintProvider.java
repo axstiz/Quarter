@@ -23,6 +23,13 @@ import java.util.List;
 public class OptimizationConstraintProvider implements ConstraintProvider {
 
     public static final double CAPACITY_UTILIZATION = 0.8;
+    static final long WEIGHT_INITIATIVE = 100_000;
+    static final long WEIGHT_STRATEGIC_SP = 1_000;
+    static final double PI_MIN_UTILIZATION = 0.6;
+    static final long WEIGHT_UTILIZATION = 50;
+    static final long WEIGHT_UNCLOSED_HH = 40;
+    static final long WEIGHT_MOVE = 10_000;
+    static final long WEIGHT_PRIORITY = 30;
 
     @Override
     public Constraint[] defineConstraints(ConstraintFactory factory) {
@@ -31,7 +38,61 @@ public class OptimizationConstraintProvider implements ConstraintProvider {
                 roleHoursCapacity(factory),
                 dependencyAfterBlocker(factory),
                 soleHolderNotMoved(factory),
+                initiativeCompletedReward(factory),
+                strategicSpReward(factory),
+                teamUtilizationPenalty(factory),
+                unclosedRoleHoursPenalty(factory),
+                staffingMovePenalty(factory),
+                priorityOrderPenalty(factory),
         };
+    }
+
+    /** ЗАГЛУШКА (RED). */
+    Constraint initiativeCompletedReward(ConstraintFactory factory) {
+        return factory.forEach(TaskPartAssignment.class)
+                .filter(a -> false)
+                .penalize(HardSoftScore.ONE_SOFT)
+                .asConstraint("initiativeCompletedReward");
+    }
+
+    /** ЗАГЛУШКА (RED). */
+    Constraint strategicSpReward(ConstraintFactory factory) {
+        return factory.forEach(TaskPartAssignment.class)
+                .filter(a -> false)
+                .penalize(HardSoftScore.ONE_SOFT)
+                .asConstraint("strategicSpReward");
+    }
+
+    /** ЗАГЛУШКА (RED). */
+    Constraint teamUtilizationPenalty(ConstraintFactory factory) {
+        return factory.forEach(TaskPartAssignment.class)
+                .filter(a -> false)
+                .penalize(HardSoftScore.ONE_SOFT)
+                .asConstraint("teamUtilizationPenalty");
+    }
+
+    /** ЗАГЛУШКА (RED). */
+    Constraint unclosedRoleHoursPenalty(ConstraintFactory factory) {
+        return factory.forEach(TaskPartAssignment.class)
+                .filter(a -> false)
+                .penalize(HardSoftScore.ONE_SOFT)
+                .asConstraint("unclosedRoleHoursPenalty");
+    }
+
+    /** ЗАГЛУШКА (RED). */
+    Constraint staffingMovePenalty(ConstraintFactory factory) {
+        return factory.forEach(StaffingMove.class)
+                .filter(move -> false)
+                .penalize(HardSoftScore.ONE_SOFT)
+                .asConstraint("staffingMovePenalty");
+    }
+
+    /** ЗАГЛУШКА (RED). */
+    Constraint priorityOrderPenalty(ConstraintFactory factory) {
+        return factory.forEach(TaskPartAssignment.class)
+                .filter(a -> false)
+                .penalize(HardSoftScore.ONE_SOFT)
+                .asConstraint("priorityOrderPenalty");
     }
 
     /** Ёмкость команды по SP: сумма планируемых SP в спринте не превышает velocity × 0,8. */
