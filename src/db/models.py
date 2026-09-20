@@ -141,6 +141,10 @@ class PlanItemORM(Base):
     sprint_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reason: Mapped[str] = mapped_column(String, default="")
     planned_sp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    assignments: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
+    pinned_sprint: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pinned_engineer_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    pinned_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class SprintFactORM(Base):

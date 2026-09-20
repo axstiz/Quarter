@@ -62,6 +62,39 @@ class TeamHistory(BaseModel):
     planned_sp: float
 
 
+class Assignment(BaseModel):
+    task_id: str
+    role: str
+    engineer_id: str
+    sprint_no: int
+    hours: float
+    is_pinned: bool = False
+
+
+class PersonScheduleItem(BaseModel):
+    task_id: str
+    role: str
+    hours: float
+    position: int = 1
+    is_pinned: bool = False
+    summary: str = ""
+
+
+class PersonPlanResponse(BaseModel):
+    engineer_id: str
+    team_id: str = ""
+    role: str = ""
+    capacity_rate: float = 1.0
+    hours_per_sprint: float = 80.0
+    schedules: dict[int, list[PersonScheduleItem]] = {}
+
+
+class PinRequest(BaseModel):
+    sprint_no: int
+    engineer_id: str | None = None
+    position: int | None = None
+
+
 class Explanation(BaseModel):
     task_id: str
     decision: PlanDecision
@@ -71,6 +104,10 @@ class Explanation(BaseModel):
 
 class PlanItem(Explanation):
     step_points_sp: float | None = None  # запланированные SP в спринте
+    assignments: list[Assignment] = Field(default_factory=list)
+    pinned_sprint: int | None = None
+    pinned_engineer_id: str | None = None
+    pinned_position: int | None = None
 
 
 class SprintPlan(BaseModel):

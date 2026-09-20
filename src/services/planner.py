@@ -1,16 +1,13 @@
-"""Жадный планировщик квартала (change 003).
+"""Жадный планировщик квартала (change 003, 016).
 
-Правила (спека planning):
+Правила (спека planning, 016-person-planner):
 1. SP-гейт: не больше остатка capacity команды (velocity × 0.8).
-2. Роль-гейт: часы ролей закрывают инженеры своей и (при кросс-заёме) других
+2. Роль-гейт: часы ролей закрывают конкретные инженеры своей и (при кросс-заёме) других
    команд; суммарная загрузка инженера ≤ лимит (80 ч полная ставка, 40 ч
    при 0.5); роль без носителей — виртуальный держатель (допущение).
-3. Статусы: Done — вне плана; InProgress — остаток по часам, SP
-   пропорционально; ToDo — полный объём.
-4. Приоритет (меньше — раньше; seed при импорте) управляет очерёдностью.
-5. Зависимости: блокирующая не позже зависимой.
-6. Задача может разбиваться между спринтами (SP/часы пропорционально);
-   зависимые стартуют после последнего спринта разбитой задачи.
+3. Персональные назначения: решения о распределении сохраняются в виде Assignment
+   (task × role × engineer × sprint).
+4. Закрепления (pin): задачи с pin планируются на этапе pre-occupancy до остальных.
 """
 from __future__ import annotations
 
@@ -20,6 +17,7 @@ from collections import defaultdict
 from src.domain.models import (
     HOURS_PER_SPRINT_FULL,
     SPRINTS_PER_QUARTER,
+    Assignment,
     Engineer,
     Explanation,
     Plan,
@@ -71,13 +69,27 @@ def _effective(task: Task, spent: float) -> tuple[float, float, bool]:
     return task.estimated_hh, task.estimation_sp, False
 
 
-def _put_hours(role: str, hours: float, sprint: int,
-               eng_limits: dict[str, float], eng_roles: dict[str, set[str]],
-               eng_used: dict[int, dict[str, float]]) -> float:
-    """Сколько часов роли реально закрыть инженерами в конкретном спринте."""
+def _put_hours(
+    role: str,
+    hours: float,
+    sprint: int,
+    eng_limits: dict[str, float],
+    eng_roles: dict[str, set[str]],
+    eng_used: dict[int, dict[str, float]],
+    orig_roles: dict[str, str],
+    preferred_engineer_id: str | None = None,
+) -> tuple[float, list[tuple[str, float]]]:
+    """Сколько часов роли реально закрыть инженерами в конкретном спринте, и список (engineer_id, hours)."""
     holders = [e for e, roles in eng_roles.items() if role in roles]
-    holders.sort(key=lambda eid: eng_limits[eid] - eng_used[sprint][eid], reverse=True)
+
+    def _sort_key(eid: str):
+        is_pref = 0 if (preferred_engineer_id and eid == preferred_engineer_id) else 1
+        free = eng_limits[eid] - eng_used[sprint][eid]
+        return (is_pref, -free, eid)
+
+    holders.sort(key=_sort_key)
     placed = 0.0
+    assignments: list[tuple[str, float]] = []
     for eid in holders:
         if placed >= hours:
             break
@@ -87,28 +99,119 @@ def _put_hours(role: str, hours: float, sprint: int,
         put = min(hours - placed, free)
         eng_used[sprint][eid] += put
         placed += put
-    return placed
+        assignments.append((eid, put))
+    return placed, assignments
 
 
-def generate_plan(data: PlannerInput, first_free_sprint: int = 1, strategy: str = "priority") -> Plan:
+def generate_plan(
+    data: PlannerInput,
+    first_free_sprint: int = 1,
+    strategy: str = "priority",
+    pins: dict[str, dict] | None = None,
+) -> Plan:
+    pins = pins or {}
     task_by_id = {t.task_id: t for t in data.tasks}
     tasks_in_cycle = set(find_cycle(data.deps, list(task_by_id)))
 
     # --- инженеры: лимиты, роли; виртуальные держатели ролей без носителей ---
     eng_limits: dict[str, float] = {}
     eng_roles: dict[str, set[str]] = defaultdict(set)
+    orig_roles: dict[str, str] = {}
     for eng in data.engineers:
         eng_limits[eng.engineer_id] = engineer_sprint_limit(eng.capacity_rate)
-        eng_roles[eng.engineer_id].add(_rl(eng.role))
-    all_roles = {_rl(rl) for t in data.tasks for rl in t.role_hours}
-    holders_roles = {r for roles in eng_roles.values() for r in roles}
-    for idx, role in enumerate(sorted(all_roles - holders_roles)):
-        vid = f"VIRTUAL-PM-{idx}"
-        eng_limits[vid] = HOURS_PER_SPRINT_FULL
-        eng_roles[vid].add(role)
+        normalized_role = _rl(eng.role)
+        eng_roles[eng.engineer_id].add(normalized_role)
+        orig_roles[normalized_role] = eng.role
 
-    # --- порядок задач по выбранной стратегии ---
-    todo = [t for t in data.tasks if t.status != "Done" and t.task_id not in tasks_in_cycle]
+    all_roles = {_rl(rl): rl for t in data.tasks for rl in t.role_hours}
+    holders_roles = {r for roles in eng_roles.values() for r in roles}
+    for idx, (norm_role, orig_role) in enumerate(sorted(all_roles.items())):
+        if norm_role not in holders_roles:
+            vid = f"VIRTUAL-PM-{idx}"
+            eng_limits[vid] = HOURS_PER_SPRINT_FULL
+            eng_roles[vid].add(norm_role)
+            orig_roles[norm_role] = orig_role
+
+    history_by_team: dict[str, list[TeamHistory]] = defaultdict(list)
+    for h in data.team_history:
+        history_by_team[h.team_id].append(h)
+
+    eng_used: dict[int, dict[str, float]] = {
+        n: defaultdict(float) for n in range(first_free_sprint, SPRINTS_PER_QUARTER + 1)
+    }
+    sp_left: dict[int, dict[str, float]] = {}
+    for n in range(first_free_sprint, SPRINTS_PER_QUARTER + 1):
+        sp_left[n] = {team: team_capacity_sp(hist) for team, hist in history_by_team.items()}
+    for team in {t.team_id for t in data.tasks} - set(history_by_team):
+        for n in range(first_free_sprint, SPRINTS_PER_QUARTER + 1):
+            sp_left[n][team] = 0.0
+
+    assigned_end: dict[str, int] = {}
+    plan = Plan(
+        plan_id="",
+        sprints=[SprintPlan(sprint_no=n, items=[]) for n in range(first_free_sprint, SPRINTS_PER_QUARTER + 1)],
+        decisions=[],
+    )
+
+    blocked_by: dict[str, list[str]] = defaultdict(list)
+    for blocking, blocked in data.deps:
+        if blocked in task_by_id:
+            blocked_by[blocked].append(blocking)
+
+    # --- Pre-occupancy phase for PIN tasks ---
+    pinned_tasks = set(pins.keys())
+    for tid, pin_info in pins.items():
+        if tid not in task_by_id:
+            continue
+        task = task_by_id[tid]
+        pinned_sprint = pin_info.get("sprint_no", first_free_sprint)
+        if pinned_sprint < first_free_sprint or pinned_sprint > SPRINTS_PER_QUARTER:
+            continue
+        pinned_eng_id = pin_info.get("engineer_id")
+        pinned_pos = pin_info.get("position")
+
+        spent = float(data.spent_time.get(tid, 0.0) or 0.0)
+        _, eff_sp, overdue = _effective(task, spent)
+        hours_total = sum((task.role_hours or {}).values())
+
+        task_assignments: list[Assignment] = []
+        if hours_total > 0:
+            for role_name, h_need in (task.role_hours or {}).items():
+                if h_need <= 0:
+                    continue
+                rl = _rl(role_name)
+                got, ass_list = _put_hours(
+                    rl, h_need, pinned_sprint, eng_limits, eng_roles, eng_used, orig_roles, preferred_engineer_id=pinned_eng_id
+                )
+                for eid, h_placed in ass_list:
+                    task_assignments.append(Assignment(
+                        task_id=tid,
+                        role=role_name,
+                        engineer_id=eid,
+                        sprint_no=pinned_sprint,
+                        hours=h_placed,
+                        is_pinned=True,
+                    ))
+
+        left_sp = sp_left[pinned_sprint].get(task.team_id, 0.0)
+        put_sp = min(left_sp, eff_sp)
+        sp_left[pinned_sprint][task.team_id] = left_sp - put_sp
+        assigned_end[tid] = pinned_sprint
+
+        plan.sprints[pinned_sprint - first_free_sprint].items.append(PlanItem(
+            task_id=tid,
+            decision=PlanDecision.planned,
+            sprint_no=pinned_sprint,
+            reason="закреплено (pin)",
+            step_points_sp=put_sp,
+            assignments=task_assignments,
+            pinned_sprint=pinned_sprint,
+            pinned_engineer_id=pinned_eng_id,
+            pinned_position=pinned_pos,
+        ))
+
+    # --- Порядок обычных задач по выбранной стратегии ---
+    todo = [t for t in data.tasks if t.status != "Done" and t.task_id not in tasks_in_cycle and t.task_id not in pinned_tasks]
     if strategy == "metrics":
         init_sp: dict[str, float] = defaultdict(float)
         for t in todo:
@@ -132,31 +235,7 @@ def generate_plan(data: PlannerInput, first_free_sprint: int = 1, strategy: str 
         seq = {t.task_id: i for i, t in enumerate(todo_sorted)}
         order = sorted(order, key=lambda tid: seq.get(tid, len(todo_sorted)))
 
-    blocked_by: dict[str, list[str]] = defaultdict(list)
-    for blocking, blocked in data.deps:
-        if blocked in task_by_id:
-            blocked_by[blocked].append(blocking)
-
-    history_by_team: dict[str, list[TeamHistory]] = defaultdict(list)
-    for h in data.team_history:
-        history_by_team[h.team_id].append(h)
-
-    eng_used: dict[int, dict[str, float]] = {
-        n: defaultdict(float) for n in range(first_free_sprint, SPRINTS_PER_QUARTER + 1)
-    }
-    sp_left: dict[int, dict[str, float]] = {}
-    for n in range(first_free_sprint, SPRINTS_PER_QUARTER + 1):
-        sp_left[n] = {team: team_capacity_sp(hist) for team, hist in history_by_team.items()}
-    for team in {t.team_id for t in data.tasks} - set(history_by_team):
-        for n in range(first_free_sprint, SPRINTS_PER_QUARTER + 1):
-            sp_left[n][team] = 0.0
-
-    assigned_end: dict[str, int] = {}
-    plan = Plan(
-        plan_id="",
-        sprints=[SprintPlan(sprint_no=n, items=[]) for n in range(first_free_sprint, SPRINTS_PER_QUARTER + 1)],
-        decisions=[],
-    )
+    task_preferred_eng: dict[str, dict[str, str]] = defaultdict(dict)  # task_id -> {norm_role -> engineer_id}
 
     remaining = list(order)
     passes = 0
@@ -166,7 +245,6 @@ def generate_plan(data: PlannerInput, first_free_sprint: int = 1, strategy: str 
         progress = False
         still: list[str] = []
         for task_id in remaining:
-            # каждая задача получает одну полноценную попытку размещения
             if task_id in attempted:
                 continue
             attempted.add(task_id)
@@ -193,7 +271,7 @@ def generate_plan(data: PlannerInput, first_free_sprint: int = 1, strategy: str 
             hours_left = {
                 _rl(role): float(h or 0.0) for role, h in (task.role_hours or {}).items()
             }
-            # если часы ролей не заполнены — объём задаётся SP целиком (SP-only задача)
+            orig_role_names = { _rl(role): role for role in (task.role_hours or {}) }
             hours_only = hours_total > 0
 
             first_sprint: int | None = None
@@ -211,19 +289,34 @@ def generate_plan(data: PlannerInput, first_free_sprint: int = 1, strategy: str 
                     ok = True
                     break
                 placed_hh = 0.0
+                sprint_assignments: list[Assignment] = []
                 if hours_only:
                     for rl, need in list(hours_left.items()):
                         if need <= 0:
                             continue
-                        got = _put_hours(rl, need, sprint, eng_limits, eng_roles, eng_used)
+                        pref_eid = task_preferred_eng[task_id].get(rl)
+                        got, ass_list = _put_hours(rl, need, sprint, eng_limits, eng_roles, eng_used, orig_roles, preferred_engineer_id=pref_eid)
                         placed_hh += got
                         hours_left[rl] -= got
+                        role_orig_name = orig_role_names.get(rl, rl)
+                        for eid, h_placed in ass_list:
+                            sprint_assignments.append(Assignment(
+                                task_id=task_id,
+                                role=role_orig_name,
+                                engineer_id=eid,
+                                sprint_no=sprint,
+                                hours=h_placed,
+                            ))
+                            # запоминаем первого инженера для сохранения преемственности в след. спринте (например DB-202)
+                            if rl not in task_preferred_eng[task_id]:
+                                task_preferred_eng[task_id][rl] = eid
                     if placed_hh <= 0:
                         continue
                     share = placed_hh / hours_total
                     put_sp = min(left_sp, round(sp_to_place * share, 2)) if sp_to_place > 0 else 0
                 else:
                     put_sp = min(left_sp, sp_to_place)
+
                 sp_left[sprint][team] = left_sp - put_sp
                 sp_to_place = round(sp_to_place - put_sp, 2)
                 placed_hh_total += placed_hh
@@ -242,6 +335,7 @@ def generate_plan(data: PlannerInput, first_free_sprint: int = 1, strategy: str 
                     sprint_no=sprint,
                     reason=r_text,
                     step_points_sp=put_sp,
+                    assignments=sprint_assignments,
                 ))
                 if first_sprint is None:
                     first_sprint = sprint
@@ -263,8 +357,6 @@ def generate_plan(data: PlannerInput, first_free_sprint: int = 1, strategy: str 
                 progress = True
                 continue
             if first_sprint is not None and placed_hh_total > 0:
-                # частично влезла: оставляем распределённые спринты,
-                # остаток объёма — за пределами квартала (причина помечается)
                 assigned_end[task_id] = last_sprint
                 for item in plan.sprints[first_sprint - first_free_sprint].items:
                     if item.task_id == task_id:
@@ -274,7 +366,6 @@ def generate_plan(data: PlannerInput, first_free_sprint: int = 1, strategy: str 
                 progress = True
                 continue
             if first_sprint is not None:
-                # полностью откатываем частичное размещение
                 for n, vals in snapshot_sp.items():
                     sp_left[n] = dict(vals)
                 for n, vals in snapshot_eng.items():
@@ -299,3 +390,4 @@ def generate_plan(data: PlannerInput, first_free_sprint: int = 1, strategy: str 
         plan.decisions.append(Explanation(task_id=task_id, decision=PlanDecision.postponed, reason=reason))
 
     return plan
+
