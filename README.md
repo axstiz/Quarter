@@ -333,6 +333,7 @@ curl localhost:8000/api/v1/plans/<id>/warnings      # 4 вида рисков
 curl localhost:8000/api/v1/plans/<id>/diff          # сдвиги после пересчёта
 curl localhost:8000/api/v1/plans/<id>/metrics       # факт/прогноз помечены
 curl localhost:8000/api/v1/bus-factor               # расчёт + методика
+curl localhost:8000/api/v1/plans/<id>/bus-forecast  # прогноз bus factor по плановой загрузке (change 023)
 curl localhost:8000/api/v1/plans/<id>/bus-risk      # задачи плана под угрозой Bus Factor
 curl localhost:8000/api/v1/star-map/summary
 ```

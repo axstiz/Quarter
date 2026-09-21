@@ -93,6 +93,11 @@ export function usePlanBusRisk(planId: string | null | undefined) {
   return useQuery({ queryKey: ['plan', planId ?? '', 'bus-risk'], queryFn: () => api.getPlanBusRisk(planId!), enabled: !!planId })
 }
 
+/** Прогноз bus factor по плановой загрузке (change 023) — тоже привязан к версии плана. */
+export function useBusForecast(planId: string | null | undefined) {
+  return useQuery({ queryKey: ['plan', planId ?? '', 'bus-forecast'], queryFn: () => api.getBusForecast(planId!), enabled: !!planId })
+}
+
 export function useEngineers(filters: EngineerFilters) {
   return useQuery({
     queryKey: keys.engineers(filters),

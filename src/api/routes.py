@@ -784,6 +784,20 @@ async def plan_bus_risk_endpoint(plan_id: str, ctx: Context = Depends(require_co
     return plan_bus_risk(planned, tasks, engineers)
 
 
+@router.get("/plans/{plan_id}/bus-forecast")
+async def plan_bus_forecast_endpoint(plan_id: str, ctx: Context = Depends(require_context)) -> dict:
+    """Прогноз bus factor по плановой загрузке (change 023): assignments версии
+    плана → загрузка по спринтам, критичные роли, перегруз, риск «если уйдёт»."""
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
+    if not plan_orm:
+        raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
+    items = await get_plan_items(ctx.session, plan_id)
+    plan = _plan_from_orm(plan_id, items)
+    tasks, engineers, _, _ = await load_world(ctx.session, workspace_id=ctx.workspace_id)
+    from src.services.bus_factor import plan_bus_forecast
+    return plan_bus_forecast(plan, tasks, engineers)
+
+
 @router.get("/bus-factor")
 async def bus_factor(
     scope_type: str | None = None,
