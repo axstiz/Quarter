@@ -1,20 +1,19 @@
 import type { Decision, Engineer } from '@/api/types'
 import type { PlanModel, PlanRow } from './planModel'
 import { SPRINT_NUMBERS } from './planModel'
-import { cardKey, type Placement } from './ganttOverrides'
 
 /**
  * Гант по ролям: агрегаты (команда × роль × спринт) без назначений конкретным людям.
- * Часы ролей частей задач (в раскладке Ганта, с учётом локальных переносов) ложатся
- * целиком на носителей роли: сначала своя команда задачи, при её отсутствии — команда
- * с наибольшим свободным лимитом носителей (кросс-командный заём). Если носителей роли
- * нет ни в одной команде — явный дефицит в команде задачи (виртуальный держатель).
- * Лимит роли в команде = Σ (80 ч × capacity_rate) по её носителям.
+ * Часы ролей частей задач (в раскладке плана; переносы приходят пересборкой плана
+ * через pin) ложатся целиком на носителей роли: сначала своя команда задачи, при её
+ * отсутствии — команда с наибольшим свободным лимитом носителей (кросс-командный заём).
+ * Если носителей роли нет ни в одной команде — явный дефицит в команде задачи
+ * (виртуальный держатель). Лимит роли в команде = Σ (80 ч × capacity_rate) по её носителям.
  */
 
 export interface RoleChip {
   taskId: string
-  /** Спринт части по плану (ключ локального переноса) */
+  /** Спринт части по плану */
   sprintNo: number
   part: number
   parts: number
@@ -71,20 +70,19 @@ interface Demand {
   hours: number
 }
 
-function rowsByShownSprint(model: PlanModel, placement: Placement): Map<number, PlanRow[]> {
+function rowsByShownSprint(model: PlanModel): Map<number, PlanRow[]> {
   const map = new Map<number, PlanRow[]>(SPRINT_NUMBERS.map((n) => [n, [] as PlanRow[]]))
   for (const s of model.sprints) {
     for (const row of s.rows) {
       if (row.sprint_no == null) continue
-      const target = placement[cardKey(row.task_id, row)] ?? row.sprint_no
-      map.get(target)?.push(row)
+      map.get(row.sprint_no)?.push(row)
     }
   }
   return map
 }
 
-export function buildRoleModel(model: PlanModel, engineers: Engineer[], placement: Placement): RoleModel {
-  const map = rowsByShownSprint(model, placement)
+export function buildRoleModel(model: PlanModel, engineers: Engineer[]): RoleModel {
+  const map = rowsByShownSprint(model)
   interface Pool {
     role: string
     norm: string

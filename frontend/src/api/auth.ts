@@ -1,6 +1,8 @@
 /**
  * Сессия входа: JWT от /auth/* (эти ручки смонтированы на корне бэка, не в /api/v1),
  * роль и id пользователя — для UI-гейтинга; сервер всё равно проверяет права сам.
+ * Активный workspace (change 021) хранится рядом: role — роль в активном контексте
+ * (по membership, обновляется при переключении), workspaceId — 'default' или id.
  */
 export type AuthRole = 'reader' | 'editor' | 'admin'
 
@@ -9,6 +11,8 @@ export interface AuthSession {
   role: AuthRole
   email: string
   userId: string
+  /** Активный workspace; 'default' или отсутствие поля = базовый контекст */
+  workspaceId?: string
 }
 
 const KEY = 'quarter-auth'
@@ -42,6 +46,18 @@ export function clearAuth() {
 
 export function getRole(): AuthRole | null {
   return loadAuth()?.role ?? null
+}
+
+/** Активный workspace контекста ('default', если не переключались). */
+export function getWorkspaceId(): string {
+  return loadAuth()?.workspaceId || 'default'
+}
+
+/** Смена workspace: обновляет контекст сессии и роль в нём (по membership из GET /workspaces). */
+export function setWorkspace(id: string, role?: AuthRole) {
+  const session = loadAuth()
+  if (!session) return
+  saveAuth({ ...session, workspaceId: id === 'default' ? undefined : id, role: role ?? session.role })
 }
 
 /** reader — только просмотр; mutations в UI отключаются (сервер всё равно enforcing). */

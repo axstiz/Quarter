@@ -1,12 +1,13 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { BarChart3, CalendarRange, ClipboardCheck, LogOut, Menu, Moon, Sparkles, Sun, Upload } from 'lucide-react'
+import { BarChart3, Building2, CalendarRange, ClipboardCheck, LogOut, Menu, Moon, ShieldCheck, Sparkles, Sun, Upload, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation, useSearchParams } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { USE_MOCKS } from '@/api/client'
-import { useCurrentPlanId, useFacts, usePlanVersions } from '@/api/queries'
+import { useCurrentPlanId, useFacts, usePlanVersions, useSwitchWorkspace, useWorkspaces } from '@/api/queries'
+import { getWorkspaceId, type AuthRole } from '@/api/auth'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Field'
-import { clearAuth, getRole, type AuthRole } from '@/api/auth'
+import { clearAuth, getRole } from '@/api/auth'
 import { formatDateTime } from '@/lib/format'
 import { versionLabel } from '@/lib/labels'
 import { t } from '@/lib/motion'
@@ -21,12 +22,20 @@ const NAV = [
   { to: '/metrics', label: 'Метрики', icon: BarChart3 },
 ]
 
+const ADMIN_NAV = [
+  { to: '/workspace/people', label: 'Участники', icon: Users },
+  { to: '/permissions', label: 'Права и аудит', icon: ShieldCheck },
+]
+
 const TITLES: Record<string, string> = {
   '/plan': 'План квартала',
   '/sprint': 'Факт спринта',
   '/team-map': 'Звёздная карта',
   '/metrics': 'Метрики',
   '/import': 'Загрузка данных',
+  '/workspaces': 'Рабочие пространства',
+  '/workspace/people': 'Участники',
+  '/permissions': 'Права и аудит',
 }
 
 export function Layout() {
@@ -51,6 +60,7 @@ export function Layout() {
           <Button className="topbar__menu" variant="ghost" iconOnly icon={<Menu />} aria-label="Открыть меню" onClick={() => setMenuOpen(true)} />
           <PlanVersionSelect />
           <div className="topbar__spacer" />
+          <WorkspaceSwitcher />
           <QuarterStrip />
         </header>
         {/* Смена раздела: короткое проявление контента. Выход мгновенный — навигация не должна ждать анимацию. */}
@@ -68,6 +78,8 @@ function Sidebar({ open }: { open: boolean }) {
   const plan = params.get('plan')
   const search = plan ? `?plan=${plan}` : ''
   const role = getRole()
+  const workspaces = useWorkspaces()
+  const activeWs = workspaces.data?.find((w) => w.id === getWorkspaceId())
 
   return (
     <aside className="sidebar" data-open={open} aria-label="Навигация">
@@ -75,7 +87,7 @@ function Sidebar({ open }: { open: boolean }) {
         <img className="brand__mark" src="/favicon.svg" alt="" />
         <div>
           <div className="brand__name">Квартал</div>
-          <div className="brand__sub">планирование команд</div>
+          <div className="brand__sub">{activeWs ? activeWs.name : 'планирование команд'}</div>
           {role && <div className="brand__sub">роль: {ROLE_LABEL[role]}</div>}
         </div>
       </div>
@@ -91,8 +103,29 @@ function Sidebar({ open }: { open: boolean }) {
             )}
           </NavLink>
         ))}
+        {role === 'admin' && ADMIN_NAV.map(({ to, label, icon: Icon }) => (
+          <NavLink key={to} to={to} className="nav__item">
+            {({ isActive }) => (
+              <>
+                {isActive && <motion.span layoutId="nav-active" className="nav__active" transition={t.layout} />}
+                <Icon aria-hidden />
+                <span>{label}</span>
+              </>
+            )}
+          </NavLink>
+        ))}
       </nav>
       <div className="sidebar__footer">
+        {/* смена компании (021): возврат на онбординг-экран выбора */}
+        <NavLink to="/workspaces" end className="nav__item">
+          {({ isActive }) => (
+            <>
+              {isActive && <motion.span layoutId="nav-active" className="nav__active" transition={t.layout} />}
+              <Building2 aria-hidden />
+              <span>Сменить пространство</span>
+            </>
+          )}
+        </NavLink>
         <NavLink to="/import" className="nav__item">
           {({ isActive }) => (
             <>
@@ -122,6 +155,44 @@ function Sidebar({ open }: { open: boolean }) {
         </div>
       </div>
     </aside>
+  )
+}
+
+/** Активный workspace в топбаре: быстрое переключение без ухода с экрана (021 §2.3). */
+function WorkspaceSwitcher() {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const switchWs = useSwitchWorkspace()
+  const workspaces = useWorkspaces()
+  const activeId = getWorkspaceId()
+  if (!getRole()) return null
+  const list = workspaces.data ?? []
+  if (!list.length) return null
+
+  const options = [
+    ...list.map((w) => ({ value: w.id, label: `${w.id === activeId ? '● ' : ''}${w.name}` })),
+    { value: '__all', label: 'Все пространства…' },
+  ]
+
+  return (
+    <Select
+      size="sm"
+      width={200}
+      aria-label="Рабочее пространство"
+      value={activeId}
+      onChange={(e) => {
+        const id = e.target.value
+        if (id === '__all') {
+          navigate('/workspaces')
+          return
+        }
+        const role = list.find((w) => w.id === id)?.role
+        switchWs(id, role)
+        // сброс URL-state контента: планы/задачи другого пространства не показываем
+        navigate(location.pathname)
+      }}
+      options={options}
+    />
   )
 }
 

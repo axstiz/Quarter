@@ -15,22 +15,40 @@ export class ApiError extends Error {
   }
 }
 
-type Method = 'GET' | 'POST' | 'PUT' | 'DELETE'
+type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 let authRedirecting = false
 
+/** Ручки под /api/v1. */
 export async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
+  return doRequest(method, path, body, API_BASE)
+}
+
+/** Ручки, смонтированные на корне бэка (/workspaces, /permissions) — проксируются отдельно от /api/v1. */
+export async function requestRoot<T>(method: Method, path: string, body?: unknown): Promise<T> {
+  return doRequest(method, path, body, '')
+}
+
+async function doRequest<T>(method: Method, path: string, body: unknown, base: string): Promise<T> {
   if (USE_MOCKS) {
     const { handleMock } = await import('../mocks')
-    return handleMock<T>(method, path, body)
+    const auth = loadAuth()
+    const headers: Record<string, string> = {}
+    if (auth?.token) headers.Authorization = `Bearer ${auth.token}`
+    const ws = auth?.workspaceId
+    if (ws && ws !== 'default') headers['X-Workspace-Id'] = ws
+    return handleMock<T>(method, path, body, headers)
   }
 
   const isForm = body instanceof FormData
   const headers: Record<string, string> = body && !isForm ? { 'Content-Type': 'application/json' } : {}
   const auth = loadAuth()
   if (auth?.token && !path.startsWith('/auth/')) headers.Authorization = `Bearer ${auth.token}`
+  // workspace-контекст (change 021): не-default передаётся заголовком на все ручки
+  const ws = auth?.workspaceId
+  if (auth?.token && ws && ws !== 'default' && !path.startsWith('/auth/')) headers['X-Workspace-Id'] = ws
 
-  const res = await fetch(API_BASE + path, {
+  const res = await fetch(base + path, {
     method,
     headers,
     body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),

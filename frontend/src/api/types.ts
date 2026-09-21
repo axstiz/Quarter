@@ -1,5 +1,7 @@
 // Типы ответов бэка. Источник: docs/api-contract.md + src/api/routes.py (openapi.json без схем ответов).
 
+import type { AuthRole } from './auth'
+
 export type Decision = 'planned' | 'postponed' | 'cancelled' | 'cancelled_pending' | 'done_actual'
 
 export interface PlanTask {
@@ -15,6 +17,9 @@ export interface PlanTask {
   planned_in_sprint: boolean
   team_id: string
   role_hours: Record<string, number>
+  /** pin (016): закрепление задачи за спринтом/носителем — сервер пересобирает план */
+  pinned_sprint?: number | null
+  pinned_engineer_id?: string | null
 }
 
 export interface Explanation {
@@ -106,6 +111,55 @@ export interface OptimizeJob {
   score: { hard: number; soft: number } | null
 }
 
+// --- workspaces (changes 008/009, UI — change 021) ---
+
+export interface WorkspaceInfo {
+  id: string
+  name: string
+  created_by: string | null
+  /** Роль пользователя в этом workspace (по membership) */
+  role: AuthRole
+}
+
+export interface WorkspaceMember {
+  user_id: string
+  role: AuthRole
+}
+
+/** GET /permissions/matrix — «действие × роль» (admin-колонка всегда true — инвариант 009). */
+export interface PermissionsMatrix {
+  workspace_id: string
+  matrix: Record<string, Record<AuthRole, boolean>>
+}
+
+export interface AuditEntry {
+  id: number
+  actor_id: string
+  action: string
+  target: string
+  details: Record<string, unknown> | null
+  created_at: string
+}
+
+// --- AI-советник (change 015, UI — change 021 §5) ---
+
+export type AdviceKind = 'task_move' | 'staffing_shift' | 'initiative_rescue' | 'sprint_priority'
+
+export interface AdviceItem {
+  kind: AdviceKind
+  affected_task_ids: string[]
+  affected_engineers: string[]
+  message: string
+  numeric_basis: string
+  expected_effect: string
+}
+
+export interface AdviceReport {
+  mode: 'llm' | 'fallback'
+  comment_considered: boolean
+  advice: AdviceItem[]
+}
+
 export type WarningKind = 'deadline_overflow' | 'dependency_shift' | 'role_deficit' | 'grade_deficit' | 'composition_change'
 
 export interface PlanWarning {
@@ -179,6 +233,20 @@ export interface BusFactorItem {
 export interface BusFactorReport {
   items: BusFactorItem[]
   methodology: string
+}
+
+/** GET /plans/{id}/bus-risk — задачи плана, зависящие от ролей с единственным носителем (change 015-гейт). */
+export interface PlanBusRiskTask {
+  task_id: string
+  summary: string
+  sprint_no: number | null
+  at_risk_keys: string[]
+  holders: Record<string, string[]>
+}
+
+export interface PlanBusRisk {
+  total_at_risk: number
+  tasks: PlanBusRiskTask[]
 }
 
 export interface StarMapSummary {

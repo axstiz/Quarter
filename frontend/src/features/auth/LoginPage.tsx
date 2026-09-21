@@ -27,7 +27,7 @@ export function LoginPage() {
     setBusy('login')
     try {
       await login(email.trim().toLowerCase(), password)
-      navigate('/plan', { replace: true })
+      navigate('/workspaces', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Вход не удался')
     } finally {
@@ -40,7 +40,7 @@ export function LoginPage() {
     setBusy(role)
     try {
       await demoLogin(role)
-      navigate('/plan', { replace: true })
+      navigate('/workspaces', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Демо-вход не удался')
     } finally {

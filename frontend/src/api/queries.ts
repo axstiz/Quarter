@@ -1,5 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
+import { getWorkspaceId, setWorkspace, type AuthRole } from './auth'
 import { api } from './endpoints'
 import type { EngineerFilters, SprintFactInput } from './types'
 
@@ -18,6 +19,10 @@ export const keys = {
   engineer: (id: string) => ['engineer', id] as const,
   starMap: ['star-map'] as const,
   busFactor: ['bus-factor'] as const,
+  workspaces: ['workspaces'] as const,
+  members: (wsId: string) => ['members', wsId] as const,
+  permissions: ['permissions'] as const,
+  audit: ['audit'] as const,
 }
 
 /** Список версий плана; последняя в цепочке — актуальная. */
@@ -84,6 +89,11 @@ export function useStarMap() {
 
 export function useBusFactor() {
   return useQuery({ queryKey: keys.busFactor, queryFn: api.getBusFactor })
+}
+
+/** Советы и bus-risk строятся на конкретной версии плана — инвалидируются с ['plan'] цепочкой. */
+export function usePlanBusRisk(planId: string | null | undefined) {
+  return useQuery({ queryKey: ['plan', planId ?? '', 'bus-risk'], queryFn: () => api.getPlanBusRisk(planId!), enabled: !!planId })
 }
 
 export function useEngineers(filters: EngineerFilters) {
@@ -175,4 +185,87 @@ export function useCancelTask(planId: string) {
       step === 'request' ? api.cancelRequest(planId, taskId) : api.confirmCancel(planId, taskId),
     onSuccess: invalidate,
   })
+}
+
+// --- pin/unpin (016/020): переносы через бэк; сервер пересобирает план на той же версии ---
+
+export function usePinTask(planId: string) {
+  const invalidate = useInvalidatePlans()
+  return useMutation({
+    mutationFn: ({ taskId, sprintNo }: { taskId: string; sprintNo: number }) =>
+      api.pinTask(planId, taskId, { sprint_no: sprintNo }),
+    onSuccess: invalidate,
+  })
+}
+
+export function useUnpinTask(planId: string) {
+  const invalidate = useInvalidatePlans()
+  return useMutation({
+    mutationFn: (taskId: string) => api.unpinTask(planId, taskId),
+    onSuccess: invalidate,
+  })
+}
+
+/** «Сбросить переносы»: снять закрепления со всех pin-задач плана (по одной, чтобы не гонять БД параллельно). */
+export function useUnpinAllTasks(planId: string) {
+  const invalidate = useInvalidatePlans()
+  return useMutation({
+    mutationFn: async (taskIds: string[]) => {
+      for (const id of taskIds) await api.unpinTask(planId, id)
+    },
+    onSuccess: invalidate,
+  })
+}
+
+// --- workspaces (change 021) ---
+
+export function useWorkspaces() {
+  return useQuery({ queryKey: keys.workspaces, queryFn: api.listWorkspaces })
+}
+
+export function useCreateWorkspace() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => api.createWorkspace(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.workspaces }),
+  })
+}
+
+/**
+ * Смена workspace (021 §1.2): обновить контекст сессии (заголовок X-Workspace-Id + роль
+ * в контексте из membership) и сбросить все кэши запросов — данные чужого контекста
+ * не должны притворяться состоянием нового. URL-state контента (?plan=, ?task=) сбрасывает вызывающая сторона.
+ */
+export function useSwitchWorkspace() {
+  const qc = useQueryClient()
+  return (id: string, role?: AuthRole) => {
+    if (getWorkspaceId() === id) return
+    setWorkspace(id, role)
+    void qc.invalidateQueries()
+  }
+}
+
+export function useRemoveMember(wsId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (userId: string) => api.removeMember(wsId, userId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.members(wsId) }),
+  })
+}
+
+export function usePermissionsMatrix() {
+  return useQuery({ queryKey: keys.permissions, queryFn: api.getPermissionsMatrix })
+}
+
+export function useUpdateRolePermission() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ role, permission, enabled }: { role: string; permission: string; enabled: boolean }) =>
+      api.updateRolePermission(role, permission, enabled),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.permissions }),
+  })
+}
+
+export function useAuditLog() {
+  return useQuery({ queryKey: keys.audit, queryFn: api.getAuditLog })
 }

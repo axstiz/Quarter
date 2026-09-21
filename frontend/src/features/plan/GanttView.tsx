@@ -1,6 +1,5 @@
 import { ArrowRight, Check, ChevronDown, ShieldAlert } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { USE_MOCKS } from '@/api/client'
 import { useTeamDetails } from '@/api/queries'
 import { DecisionBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -9,14 +8,12 @@ import { Segmented } from '@/components/ui/Segmented'
 import { fmt, plural, sprintWeeks } from '@/lib/format'
 import { DECISION_LABEL } from '@/lib/labels'
 import { SPRINT_NUMBERS, isPartial, type PlanModel, type TaskSummary, formatSprints } from '@/lib/planModel'
-import { loadPlacement, projectedSprint } from '@/lib/ganttOverrides'
 import { useParam } from '@/lib/useParam'
-import type { RiskEntry } from './busRisk'
+import type { PlanBusRisk } from '@/api/types'
 
 interface Props {
   model: PlanModel
-  planId: string
-  risks: RiskEntry[]
+  planRisk: PlanBusRisk | undefined
   /** Задача → спринт, в факте которого она отмечена выполненной (выполненная задача закрывается целиком) */
   factSprintOf: Map<string, number>
   selectedId: string | null
@@ -47,18 +44,17 @@ function initiativeStatus(items: TaskSummary[]) {
  * спринта размещения, части — сегменты полосы с долями SP; не попавшее в квартал — в колонке справа от шкалы с причиной.
  * Строки группируются по инициативам (метрика квартала считается по ним) или по командам.
  */
-export function GanttView({ model, planId, risks, factSprintOf, selectedId, onSelect }: Props) {
+export function GanttView({ model, planRisk, factSprintOf, selectedId, onSelect }: Props) {
   const [groupParam, setGroupParam] = useParam('group')
   const [team, setTeam] = useParam('team')
   const [decision, setDecision] = useParam('decision')
   const [q, setQ] = useParam('q')
   const [onlyRisk, setOnlyRisk] = useParam('risk')
   const groupBy: GroupBy = groupParam === 'team' ? 'team' : 'initiative'
-  // Ручная раскладка делается в «Ролях по спринтам»; здесь её только отображаем
-  const placement = useMemo(() => (USE_MOCKS ? loadPlacement(planId) : {}), [planId])
   const [collapsed, setCollapsed] = useState<string[]>([])
 
-  const riskById = useMemo(() => new Map(risks.map((risk) => [risk.task.task_id, risk])), [risks])
+  // задачи плана с единственным носителем роли — из ручки GET /plans/{id}/bus-risk (020-гейта)
+  const riskById = useMemo(() => new Set((planRisk?.tasks ?? []).map((t) => t.task_id)), [planRisk])
   const all = [...model.tasks.values()]
   const teams = [...new Set(all.map((task) => task.team_id).filter(Boolean))].sort()
   const teamDetails = useTeamDetails(teams)
@@ -66,9 +62,9 @@ export function GanttView({ model, planId, risks, factSprintOf, selectedId, onSe
 
   // Выполненная часть стоит в спринте, где загружен факт: задача закрывается целиком, будущие спринты она не занимает
   const sprintOfRow = (task: TaskSummary, row: TaskSummary['rows'][number]) =>
-    row.decision === 'done_actual' ? (factSprintOf.get(task.task_id) ?? projectedSprint(placement, task.task_id, row)) : projectedSprint(placement, task.task_id, row)
+    row.decision === 'done_actual' ? (factSprintOf.get(task.task_id) ?? row.sprint_no!) : row.sprint_no!
   const sprintsOf = (task: TaskSummary) => [...new Set(task.rows.map((row) => sprintOfRow(task, row)))].sort((a, b) => a - b)
-  const spIn = (task: TaskSummary, n: number) => sum(task.rows.filter((row) => projectedSprint(placement, task.task_id, row) === n && row.decision !== 'done_actual').map((row) => row.step_points_sp ?? 0))
+  const spIn = (task: TaskSummary, n: number) => sum(task.rows.filter((row) => sprintOfRow(task, row) === n && row.decision !== 'done_actual').map((row) => row.step_points_sp ?? 0))
 
   const query = (q ?? '').trim().toLowerCase()
   const filtered = !!(team || decision || query || onlyRisk)
