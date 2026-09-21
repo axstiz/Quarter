@@ -53,6 +53,37 @@ async def test_advice_comment_not_persisted(auth):
 
 
 @pytest.mark.asyncio
+async def test_advice_excludes_pinned_tasks(auth):
+    """pinned-задачи не фигурируют в советах на перенос (015 §2.3): pin → советы без них."""
+    h = auth
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        await ac.post("/api/v1/data/import", headers=h)
+        gen = await ac.post("/api/v1/plans/generate", headers=h)
+        plan_id = gen.json()["plan_id"]
+
+        r1 = await ac.get(f"/api/v1/plans/{plan_id}/advice", headers=h)
+        assert r1.status_code == 200
+        advice1 = r1.json()["advice"]
+        mentioned = {t for a in advice1 for t in a["affected_task_ids"]}
+        assert mentioned, "в демо-советах есть задачи"
+
+        # закрепляем упомянутые задачи в их текущих спринтах плана
+        plan = (await ac.get(f"/api/v1/plans/{plan_id}", headers=h)).json()
+        sprint_of = {t["task_id"]: s["sprint_no"] for s in plan["sprints"] for t in s["tasks"]}
+        for tid in sorted(mentioned):
+            if tid not in sprint_of:
+                continue  # вне плана — pin не применим к текущей раскладке
+            pr = await ac.post(f"/api/v1/plans/{plan_id}/tasks/{tid}/pin",
+                               headers=h, json={"sprint_no": sprint_of[tid]})
+            assert pr.status_code == 200, pr.text
+
+        r2 = await ac.get(f"/api/v1/plans/{plan_id}/advice", headers=h)
+        assert r2.status_code == 200
+        for a in r2.json()["advice"]:
+            assert not (set(a["affected_task_ids"]) & mentioned), f"pinned-задача в совете: {a}"
+
+
+@pytest.mark.asyncio
 async def test_fallback_advice_builder():
     warnings = [{"kind": "deadline_overflow", "message": "выход за квартал",
                  "task_ids": ["MP-101", "MP-102"]}]
