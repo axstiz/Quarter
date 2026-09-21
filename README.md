@@ -282,6 +282,20 @@ uv run uvicorn src.main:app --reload  # JOBS_MODE=queue | sync | auto (default: 
 задачу через `uploaded → mapping → questions|ready`, делает повтор (2 попытки),
 по таймауту/ошибке — `failed` с причиной. Повторный прогон: `POST /api/v1/ai/normalize/{job_id}`.
 
+### LLM-провайдеры (change 026)
+
+LLM (нормализация колонок при импорте, AI-советник) настраивается через `.env`
+(шаблон — `example.env`):
+
+- `POSTCODE_LLM_PROVIDER=gigachat` (default) — Sber GigaChat, ключи `GIGACHAT_CLIENT_ID`/`GIGACHAT_CLIENT_SECRET`;
+- `POSTCODE_LLM_PROVIDER=ollama` — локальный Ollama, OpenAI-совместимый endpoint:
+  `POSTCODE_OLLAMA_BASE_URL` (default `http://localhost:11434`), `POSTCODE_OLLAMA_MODEL`;
+- `POSTCODE_LLM_PROVIDER=none` — LLM отключён.
+
+Без доступного провайдера (нет ключа, сервер не отвечает) оба сценария деградируют
+без hard-fail: нормализация — шаблонный маппинг + ручные вопросы, советник —
+детерминированные советы (`mode=fallback`).
+
 ### Оптимизация плана solver'ом (change 018)
 
 Сайдкар Timefold (Java 21, порт 8080) живёт в compose-профиле `optimizer`:
