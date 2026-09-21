@@ -10,7 +10,9 @@
 
 ## 2. Контракт советов (api)
 
-- [ ] 2.1 Ручка советов (GET /plans/{id}/advice): на заданной версии плана — советы `task_move | staffing_shift | initiative_rescue | sprint_priority`, каждый с affected_task_ids/numeric_basis/expected_effect
+- [ ] 2.1 Ручка советов (GET /plans/{id}/advice): на заданной версии плана — советы `task_move | staffing_shift | initiative_rescue | sprint_priority`, каждый с affected_task_ids/numeric_basis/expected_effect; параметр comment (опционально, ≤ 500 симв.) — одноразовый контекст прогона, никогда не сохраняется
+- [ ] 2.1a Тест comment pass-through: советы с comment=... учитывают контекст; без comment — нет; повторный вызов не хранит текст
+- [ ] 2.1b Пианель UI (фронтендеру): поле «что важно учесть» (один комментарий на весь контекст, дозапрос недоступен — подпись), не персистентное
 - [ ] 2.2 Fallback == LLM-формат (единая pydantic-модель советов)
 - [ ] 2.3 Тесты: демо-датасет — советы не пустые; невалидный LLM-ответ → retry → данные (fallback); pinned-задачи не фигурируют в советах на перенос
 
