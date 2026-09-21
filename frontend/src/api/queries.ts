@@ -140,6 +140,22 @@ export function useRecompute(planId: string) {
   return useMutation({ mutationFn: (afterSprint: number) => api.recompute(planId, afterSprint), onSuccess: invalidate })
 }
 
+/**
+ * Оптимизация версии: POST создаёт новую версию (solver или эвристика),
+ * затем дочитываем job — в тост нужны переносы людей и режим из отчёта.
+ */
+export function useOptimizePlan(planId: string) {
+  const invalidate = useInvalidatePlans()
+  return useMutation({
+    mutationFn: async () => {
+      const started = await api.optimizePlan(planId)
+      const job = await api.getOptimizeJob(started.job_id)
+      return { started, job }
+    },
+    onSuccess: invalidate,
+  })
+}
+
 export function useSetPriorities() {
   return useMutation({
     // Бэк принимает приоритет по одной задаче — шлём последовательно, чтобы не гонять БД параллельно.

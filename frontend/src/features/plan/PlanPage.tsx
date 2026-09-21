@@ -1,9 +1,9 @@
-import { CalendarRange, RotateCcw, ShieldAlert, Upload } from 'lucide-react'
+import { CalendarRange, RotateCcw, ShieldAlert, Sparkles, Upload } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { canEdit, getRole } from '@/api/auth'
-import { useBusFactor, useCurrentPlanId, useFacts, useGeneratePlan, usePlan, usePlanVersions, useTasks } from '@/api/queries'
+import { useBusFactor, useCurrentPlanId, useFacts, useGeneratePlan, useOptimizePlan, usePlan, usePlanVersions, useTasks } from '@/api/queries'
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -29,11 +29,13 @@ export function PlanPage() {
   const tasks = useTasks()
   const bus = useBusFactor()
   const generate = useGeneratePlan()
+  const optimize = useOptimizePlan(planId ?? '')
   const [confirmGenerate, setConfirmGenerate] = useState(false)
 
   const [view] = useParam('view')
   const [taskId, setTaskId] = useParam('task')
   const [riskPanel, setRiskPanel] = useParam('risks')
+  const [, setPlanParam] = useParam('plan')
 
   const model = useMemo(() => (plan.data ? buildPlanModel(plan.data, tasks.data ?? []) : null), [plan.data, tasks.data])
   const risks = useMemo(() => (model ? tasksAtRisk(model.tasks.values(), bus.data) : []), [model, bus.data])
@@ -49,6 +51,21 @@ export function PlanPage() {
       },
       onError: (e) => {
         setConfirmGenerate(false)
+        toast.error(errorTitle(e), { description: errorHint(e) })
+      },
+    })
+
+  const runOptimize = () =>
+    optimize.mutate(undefined, {
+      onSuccess: ({ started, job }) => {
+        setPlanParam(started.plan_id)
+        const moves = job.staffing_moves.length
+        const modeLabel = started.mode === 'solver' ? 'solver Timefold' : 'эвристика (сайдкар недоступен)'
+        toast.success('План оптимизирован', {
+          description: `Режим: ${modeLabel}.${moves ? ` Переносов людей: ${moves}.` : ''} Открыта новая версия — откат через селектор версий.`,
+        })
+      },
+      onError: (e) => {
         toast.error(errorTitle(e), { description: errorHint(e) })
       },
     })
@@ -110,6 +127,9 @@ export function PlanPage() {
             <div className="page-head__sub">{plan.data ? `${versionLabel(plan.data)} · 6 спринтов по 2 недели` : 'Загрузка…'}</div>
           </div>
           <div className="page-head__actions">
+            <Button variant="primary" icon={<Sparkles />} loading={optimize.isPending} disabled={readOnly} onClick={runOptimize}>
+              Оптимизировать
+            </Button>
             <Button variant="ghost" icon={<RotateCcw />} loading={generate.isPending} disabled={readOnly} onClick={() => setConfirmGenerate(true)}>
               Построить заново
             </Button>

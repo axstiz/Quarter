@@ -39,6 +39,7 @@ export interface PlanVersion {
   parent_plan_id: string | null
   recomputed_after_sprint: number | null
   created_at: string
+  strategy?: string
 }
 
 export interface GeneratePlanResponse {
@@ -71,6 +72,38 @@ export interface RecomputeResponse {
   new_plan_id: string
   parent_plan_id: string
   after_sprint: number
+}
+
+/** POST /plans/optimize — job выполняется синхронно, ответ уже финальный. */
+export interface OptimizeStartResponse {
+  status: 'ready'
+  job_id: string
+  plan_id: string
+  mode: 'solver' | 'heuristic'
+}
+
+export interface StaffingMove {
+  engineer_id: string
+  from_team_id: string
+  to_team_id: string
+}
+
+/** GET /plans/optimize/{job_id} — статус, отчёт метрик до/после и переносы людей. */
+export interface OptimizeJob {
+  job_id: string
+  status: 'queued' | 'solving' | 'ready' | 'failed'
+  mode: 'solver' | 'heuristic' | null
+  error: string | null
+  plan_id: string | null
+  report: {
+    mode: string
+    before: Record<string, unknown>
+    after: Record<string, unknown>
+    staffing_moves: StaffingMove[]
+    score_breakdown: { constraint: string; weight: number }[]
+  } | null
+  staffing_moves: StaffingMove[]
+  score: { hard: number; soft: number } | null
 }
 
 export type WarningKind = 'deadline_overflow' | 'dependency_shift' | 'role_deficit' | 'grade_deficit' | 'composition_change'

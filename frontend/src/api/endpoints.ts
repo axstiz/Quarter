@@ -9,6 +9,8 @@ import type {
   FactResponse,
   GeneratePlanResponse,
   Metrics,
+  OptimizeJob,
+  OptimizeStartResponse,
   Plan,
   PlanDiff,
   PlanVersion,
@@ -53,6 +55,9 @@ export const api = {
     request<FactResponse>('POST', `/plans/${planId}/sprints/${sprintNo}/facts`, body),
   /** after_sprint — последний спринт с фактом: пересчитываются спринты после него (по умолчанию бэк берёт 0 = весь квартал) */
   recompute: (planId: string, afterSprint: number) => request<RecomputeResponse>('POST', `/plans/${planId}/recompute?after_sprint=${afterSprint}`),
+  /** Оптимизация текущей версии плана: solver Timefold, при недоступности сайдкара — эвристика (режим в ответе). */
+  optimizePlan: (planId: string) => request<OptimizeStartResponse>('POST', '/plans/optimize', { plan_id: planId }),
+  getOptimizeJob: (jobId: string) => request<OptimizeJob>('GET', `/plans/optimize/${jobId}`),
   listFacts: (planId: string) => request<SprintFact[]>('GET', `/plans/${planId}/facts`),
   getWarnings: (planId: string) => request<PlanWarning[]>('GET', `/plans/${planId}/warnings`),
   getDiff: (planId: string) => request<PlanDiff>('GET', `/plans/${planId}/diff`),
