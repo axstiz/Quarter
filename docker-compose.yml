@@ -24,10 +24,14 @@ services:
 
   worker:
     image: postcode-planner:latest
+    build:
+      context: .
     profiles: [jobs]
     depends_on:
       - redis
-    command: arq src.ai.jobs_worker.WorkerSettings
+    command: uv run arq src.ai.jobs_worker.WorkerSettings
+    healthcheck:
+      disable: true
     environment:
       POSTCODE_DATABASE_URL: postgresql+asyncpg://postcode:postcode@db:5432/postcode
       POSTCODE_REDIS_URL: redis://redis:6379/0
@@ -56,6 +60,7 @@ services:
   # связка сервисом — бэк и фронт в контейнерах
   # (docker compose up — поднимает всё: db + api + frontend)
   api:
+    image: postcode-planner:latest
     build:
       context: .
     depends_on:
