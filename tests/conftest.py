@@ -80,6 +80,15 @@ async def db():
         session_mod.engine, session_mod.SessionLocal = old
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _jobs_sync(monkeypatch):
+    """Тесты без Redis (контракт change 007): боевая очередь/воркер не участвуют.
+    Тесты очереди (test_optimize_queue) подменяют get_queue() напрямую."""
+    from src.core.config import settings
+
+    monkeypatch.setattr(settings, "jobs_mode", "sync")
+
+
 @pytest_asyncio.fixture()
 async def auths() -> dict[str, dict]:
     """Все три роли сразу: {'admin': ..., 'editor': ..., 'reader': ...}."""

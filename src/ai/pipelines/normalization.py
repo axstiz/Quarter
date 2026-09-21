@@ -14,7 +14,7 @@ from typing import Any, Literal, TypedDict
 
 from langgraph.graph import StateGraph
 
-from src.ai.llm import LLMUnavailable, get_client
+from src.ai.llm import LLMUnavailable, complete_async, get_client
 from src.ai.ingest import readers
 from src.ai.ingest.mapping import map_row, template_map_column
 from src.ai.schemas import LLMMappingAnswer, Question
@@ -39,34 +39,77 @@ SYSTEM_PROMPT = (
 
 
 def llm_mapping(headers: list[str]) -> LLMMappingAnswer | None:
-    """LLM-сопоставление колонок; None = недоступно/невалидно."""
+    """LLM-сопоставление колонок; None = недоступно/невалидно. Sync-путь (change 007)."""
+    ans = _mapping_attempt(_llm_mapping_call, headers)
+    return ans
+
+
+async def llm_mapping_async(headers: list[str]) -> LLMMappingAnswer | None:
+    """То же с лимитом конкурентности и вне event loop (change 028)."""
+    ans = await _mapping_attempt(_llm_mapping_call_async, headers)
+    return ans
+
+
+def _mapping_attempt(call, headers):
+    """Retry 2: вызов провайдера (sync или async) → parse; повтор при невалидном JSON."""
+    for _ in range(2):
+        raw = call(headers)
+        if raw is None:
+            return None
+        ans = _parse_mapping(raw)
+        if ans is not None:
+            return ans
+    return None
+
+
+def _llm_mapping_call(headers: list[str]) -> str | None:
+    """Прогон LLM; None = недоступно."""
     try:
         client = get_client()
     except Exception:
         return None
 
     try:
-        raw = None
         user = "Колонки:\n" + "\n".join(f"- {h}" for h in headers)
-        for _ in range(2):
-            try:
-                raw = client.complete(SYSTEM_PROMPT, user)
-            except LLMUnavailable:
-                return None
-            text = raw.strip()
-            if text.startswith("```"):
-                text = text.strip("`")
-                lines = text.splitlines()
-                if lines and "{" not in lines[0]:
-                    text = "\n".join(lines[1:])
-            try:
-                data = json.loads(text)
-                return LLMMappingAnswer.model_validate(data)
-            except Exception:
-                continue
+        try:
+            return client.complete(SYSTEM_PROMPT, user)
+        except LLMUnavailable:
+            return None
     except Exception:
         return None
-    return None
+
+
+async def _llm_mapping_call_async(headers: list[str]) -> str | None:
+    try:
+        client = get_client()
+    except Exception:
+        return None
+
+    try:
+        user = "Колонки:\n" + "\n".join(f"- {h}" for h in headers)
+        try:
+            return await complete_async(client, SYSTEM_PROMPT, user)
+        except LLMUnavailable:
+            return None
+    except Exception:
+        return None
+
+
+def _parse_mapping(raw: str) -> LLMMappingAnswer | None:
+    try:
+        text = raw.strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            lines = text.splitlines()
+            if lines and "{" not in lines[0]:
+                text = "\n".join(lines[1:])
+        try:
+            data = json.loads(text)
+            return LLMMappingAnswer.model_validate(data)
+        except Exception:
+            return None
+    except Exception:
+        return None
 
 
 def _questions_from_unmapped(unmapped: list[str]) -> list[Question]:
@@ -259,9 +302,9 @@ def node_decide(state: JobState) -> JobState:
     return state
 
 
-def node_llm_map(state: JobState) -> JobState:
+async def node_llm_map(state: JobState) -> JobState:
     headers = list((state.get("tables") or [[{}]])[0][0])
-    ans = llm_mapping(headers)
+    ans = await llm_mapping_async(headers)
     if not ans:
         return state  # деградация: вопросы останутся на человеке
     extra = []
@@ -310,6 +353,25 @@ def run_stage(job: UploadJob, answers: dict[str, str] | None = None) -> UploadJo
     """Прогон пайплайна по job (parse → map → вопросы)."""
     UploadJob.JOBS[job.job_id] = job
     res = GRAPH.invoke({
+        "job_id": job.job_id,
+        "filename": job.filename,
+        "status": job.status,
+        "answers": answers or {},
+    })
+    job.status = res.get("status", "failed")  # type: ignore[assignment]
+    job.rows_by_entity = res.get("rows_by_entity", {})
+    job.unmapped_columns = res.get("unmapped", [])
+    job.column_guesses = res.get("column_guesses", [])
+    job.questions = res.get("questions", [])
+    job.preview = {k: len(v) for k, v in job.rows_by_entity.items()}
+    return job
+
+
+async def run_stage_async(job: UploadJob, answers: dict[str, str] | None = None) -> UploadJob:
+    """Тот же пайплайн через ainvoke (change 028): LLM-узел с лимитом
+    конкурентности выполняется в воркере-треде, event loop не блокируется."""
+    UploadJob.JOBS[job.job_id] = job
+    res = await GRAPH.ainvoke({
         "job_id": job.job_id,
         "filename": job.filename,
         "status": job.status,

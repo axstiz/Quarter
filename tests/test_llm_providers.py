@@ -85,3 +85,55 @@ async def test_advisor_fallback_when_ollama_down(auth, monkeypatch):
         assert r.status_code == 200
         assert r.json()["mode"] == "fallback"
         assert r.json()["advice"]
+
+
+# --- change 028: общий лимит конкурентности LLM-вызовов ---------------------
+
+@pytest.mark.asyncio
+async def test_complete_async_limits_concurrency(monkeypatch):
+    """5 параллельных complete_async при лимите 2 — не более 2 одновременных."""
+    import asyncio
+    from src.ai import llm as llm_mod
+
+    monkeypatch.setattr(llm_mod.settings, "llm_max_concurrency", 2)
+    monkeypatch.setattr(llm_mod, "_LLM_SEMAPHORE", None)  # ленивый семофор заново
+
+    active = 0
+    max_active = 0
+
+    class Slow:
+        enabled = True
+
+        def complete(self, system, user, temperature=0.0):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            try:
+                import time
+                time.sleep(0.02)
+            finally:
+                active -= 1
+            return "ok"
+
+    results = await asyncio.gather(*[
+        llm_mod.complete_async(Slow(), "s", f"u{i}") for i in range(5)])
+    assert results == ["ok"] * 5
+    assert max_active <= 2, f"лимит нарушен: {max_active} одновременных вызовов"
+
+
+@pytest.mark.asyncio
+async def test_complete_async_propagates_unavailable():
+    """Недоступный провайдер — LLMUnavailable наверх (деградация потребителя)."""
+    import asyncio
+    import pytest as _pytest
+
+    from src.ai import llm as llm_mod
+
+    class Dead:
+        enabled = True
+
+        def complete(self, system, user, temperature=0.0):
+            raise llm_mod.LLMUnavailable("нет провайдера")
+
+    with _pytest.raises(llm_mod.LLMUnavailable):
+        await llm_mod.complete_async(Dead(), "s", "u")
