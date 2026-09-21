@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { canEdit, getRole } from '@/api/auth'
-import { useBusFactor, useCurrentPlanId, useFacts, useGeneratePlan, useOptimizePlan, usePlan, usePlanVersions, useTasks } from '@/api/queries'
+import { useBusFactor, useCurrentPlanId, useFacts, useGeneratePlan, useOptimizePlan, usePlan, usePlanBusRisk, usePlanVersions, useTasks } from '@/api/queries'
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -12,7 +12,6 @@ import { Tabs } from '@/components/ui/Tabs'
 import { versionLabel } from '@/lib/labels'
 import { buildPlanModel, isPartial } from '@/lib/planModel'
 import { useParam } from '@/lib/useParam'
-import { tasksAtRisk } from './busRisk'
 import { LoadView } from './LoadView'
 import { PriorityView } from './PriorityView'
 import { RiskPanelContent } from './RiskPanel'
@@ -28,6 +27,7 @@ export function PlanPage() {
   const facts = useFacts(planId)
   const tasks = useTasks()
   const bus = useBusFactor()
+  const planRisk = usePlanBusRisk(planId)
   const generate = useGeneratePlan()
   const optimize = useOptimizePlan(planId ?? '')
   const [confirmGenerate, setConfirmGenerate] = useState(false)
@@ -38,7 +38,6 @@ export function PlanPage() {
   const [, setPlanParam] = useParam('plan')
 
   const model = useMemo(() => (plan.data ? buildPlanModel(plan.data, tasks.data ?? []) : null), [plan.data, tasks.data])
-  const risks = useMemo(() => (model ? tasksAtRisk(model.tasks.values(), bus.data) : []), [model, bus.data])
   const fixedSprints = useMemo(() => new Set(facts.data?.map((f) => f.sprint_no)), [facts.data])
   const factSprintOf = useMemo(() => new Map(facts.data?.flatMap((f) => f.completed_task_ids.map((id) => [id, f.sprint_no] as const))), [facts.data])
   const latestId = versions.data?.at(-1)?.plan_id
@@ -156,8 +155,8 @@ export function PlanPage() {
               />
               <div className="stat">
                 <span className="stat__label">Зависят от одного носителя</span>
-                <span className="stat__value">{plan.data && bus.data ? <AnimatedNumber value={risks.length} /> : <span className="skeleton" style={{ display: 'inline-block', width: 40, height: 20 }} />}</span>
-                {risks.length > 0 && (
+                <span className="stat__value">{plan.data && bus.data && planRisk.data ? <AnimatedNumber value={planRisk.data.total_at_risk} /> : <span className="skeleton" style={{ display: 'inline-block', width: 40, height: 20 }} />}</span>
+                {planRisk.data != null && planRisk.data.total_at_risk > 0 && (
                   <Button size="sm" variant="ghost" className="stat__action" icon={<ShieldAlert />} onClick={() => { setTaskId(null); setRiskPanel('1') }}>
                     Какие задачи
                   </Button>
@@ -178,7 +177,7 @@ export function PlanPage() {
             {!plan.data || !model || tasks.isLoading ? (
               <SkeletonRows rows={8} cols={6} />
             ) : current === 'sprints' ? (
-              <GanttView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} risks={risks} factSprintOf={factSprintOf} selectedId={taskId} onSelect={openTask} />
+              <GanttView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} planRisk={planRisk.data} factSprintOf={factSprintOf} selectedId={taskId} onSelect={openTask} />
             ) : current === 'roles' ? (
               <RolesView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={fixedSprints} readOnly={readOnly} selectedId={taskId} onSelect={openTask} />
             ) : current === 'load' ? (
@@ -198,7 +197,7 @@ export function PlanPage() {
         title={taskId ? (model?.tasks.get(taskId)?.summary ?? tasks.data?.find((t) => t.task_id === taskId)?.summary ?? taskId) : 'Задачи под угрозой'}
       >
         {model && plan.data && taskId && <TaskPanelContent model={model} planId={plan.data.plan_id} taskId={taskId} tasksInfo={tasks.data ?? []} busFactor={bus.data} readOnly={readOnly} onSelect={openTask} />}
-        {plan.data && !taskId && riskPanel === '1' && <RiskPanelContent risks={risks} onSelect={openTask} />}
+        {plan.data && !taskId && riskPanel === '1' && <RiskPanelContent planRisk={planRisk.data} onSelect={openTask} />}
       </Panel>
 
       <ConfirmDialog

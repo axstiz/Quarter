@@ -86,6 +86,11 @@ export function useBusFactor() {
   return useQuery({ queryKey: keys.busFactor, queryFn: api.getBusFactor })
 }
 
+/** Советы и bus-risk строятся на конкретной версии плана — инвалидируются с ['plan'] цепочкой. */
+export function usePlanBusRisk(planId: string | null | undefined) {
+  return useQuery({ queryKey: ['plan', planId ?? '', 'bus-risk'], queryFn: () => api.getPlanBusRisk(planId!), enabled: !!planId })
+}
+
 export function useEngineers(filters: EngineerFilters) {
   return useQuery({
     queryKey: keys.engineers(filters),

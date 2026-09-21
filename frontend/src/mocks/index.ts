@@ -262,6 +262,47 @@ on('GET', '/plans/:id/warnings', ([id]) => {
   const done = new Set(facts.filter((f) => f.plan_id === id).flatMap((f) => f.completed_task_ids))
   return computeWarnings(before, recomputedPlan(before, done), done, taskMap(), deps(), ENGINEERS)
 })
+on('GET', '/plans/:id/bus-risk', ([id]) => {
+  planOrm(id)
+  // по формуле plan_bus_risk (bus_factor.py): часы роли с единственным носителем / без носителя
+  const planned = items.filter((i) => i.plan_id === id && i.decision === 'planned')
+  const engineers = ENGINEERS
+  const role_holders: Record<string, string[]> = {}
+  for (const e of engineers) role_holders.setdefault(e.role.toLowerCase(), []).push(e.engineer_id)
+  const rows = planned.map((i) => {
+    const task = taskMap().get(i.task_id)
+    if (!task) return null
+    const at_risk: string[] = []
+    const holders: Record<string, string[]> = {}
+    for (const role of task.role_hours ?? []) {
+      const hs = role_holders.get(role.toLowerCase()) ?? []
+      if (hs.length <= 1) {
+        at_risk.push(role)
+        holders[role] = hs
+      }
+    }
+    return { task_id: task.task_id, summary: task.summary, sprint_no: i.sprint_no, at_risk_keys: at_risk, holders }
+  }).filter((x): x is NonNullable<typeof x> => x && (x as { at_risk_keys: string[] }).at_risk_keys.length > 0)
+  return { total_at_risk: rows.length, tasks: rows as typeof rows }
+})
+
+// pin/unpin (016): локальные правки на plan-item; apply-draft allocator нет — визуальный слой
+on('POST', '/plans/:id/tasks/:tid/pin', ([id, tid], body) => {
+  planOrm(id)
+  const sprint = (body as { sprint_no?: number } | undefined)?.sprint_no
+  if (typeof sprint !== 'number' || sprint < 1 || sprint > 6) throw new ApiError(422, 'sprint_no обязателен (1..6)')
+  const rows = items.filter((i) => i.plan_id === id && i.task_id === tid)
+  if (!rows.length) throw new ApiError(404, 'задача не в плане')
+  for (const r of rows) r.pinned_sprint = sprint
+  return { status: 'pinned' }
+})
+on('DELETE', '/plans/:id/tasks/:tid/pin', ([id, tid]) => {
+  planOrm(id)
+  const rows = items.filter((i) => i.plan_id === id && i.task_id === tid)
+  if (!rows.length) throw new ApiError(404, 'задача не в плане')
+  for (const r of rows) r.pinned_sprint = null
+  return { status: 'unpinned' }
+})
 on('GET', '/plans/:id/diff', ([id]) => {
   planOrm(id)
   const before = planFromRows(id)

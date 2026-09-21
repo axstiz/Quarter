@@ -1,6 +1,7 @@
 import { query, request } from './client'
 import type {
   BusFactorReport,
+  PlanBusRisk,
   ConfirmResponse,
   Dependency,
   Engineer,
@@ -49,6 +50,11 @@ export const api = {
     request<{ status: string }>('POST', `/plans/${planId}/tasks/${taskId}/cancel-request`),
   confirmCancel: (planId: string, taskId: string) =>
     request<{ status: string }>('POST', `/plans/${planId}/tasks/${taskId}/confirm-cancel`),
+  /** pin/unpin (016): закрепление задачи за спринтом/носителем; бэк валидирует конфликт ёмкости (409) */
+  pinTask: (planId: string, taskId: string, body: { sprint_no: number; engineer_id?: string }) =>
+    request<{ status: string }>('POST', `/plans/${planId}/tasks/${taskId}/pin`, body),
+  unpinTask: (planId: string, taskId: string) =>
+    request<{ status: string }>('DELETE', `/plans/${planId}/tasks/${taskId}/pin`),
   listTasks: () => request<TaskInfo[]>('GET', '/tasks'),
   listDependencies: () => request<Dependency[]>('GET', '/dependencies'),
 
@@ -71,6 +77,7 @@ export const api = {
   getEngineer: (id: string) => request<EngineerProfile>('GET', `/engineers/${id}`),
   getStarMap: () => request<StarMapSummary>('GET', '/star-map/summary'),
   getBusFactor: () => request<BusFactorReport>('GET', '/bus-factor'),
+  getPlanBusRisk: (planId: string) => request<PlanBusRisk>('GET', `/plans/${planId}/bus-risk`),
 
   // Стр. 4 — метрики
   getMetrics: (planId: string) => request<Metrics>('GET', `/plans/${planId}/metrics`),

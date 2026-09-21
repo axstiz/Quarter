@@ -11,12 +11,12 @@ import { DECISION_LABEL } from '@/lib/labels'
 import { SPRINT_NUMBERS, isPartial, type PlanModel, type TaskSummary, formatSprints } from '@/lib/planModel'
 import { loadPlacement, projectedSprint } from '@/lib/ganttOverrides'
 import { useParam } from '@/lib/useParam'
-import type { RiskEntry } from './busRisk'
+import type { PlanBusRisk } from '@/api/types'
 
 interface Props {
   model: PlanModel
   planId: string
-  risks: RiskEntry[]
+  planRisk: PlanBusRisk | undefined
   /** Задача → спринт, в факте которого она отмечена выполненной (выполненная задача закрывается целиком) */
   factSprintOf: Map<string, number>
   selectedId: string | null
@@ -47,7 +47,7 @@ function initiativeStatus(items: TaskSummary[]) {
  * спринта размещения, части — сегменты полосы с долями SP; не попавшее в квартал — в колонке справа от шкалы с причиной.
  * Строки группируются по инициативам (метрика квартала считается по ним) или по командам.
  */
-export function GanttView({ model, planId, risks, factSprintOf, selectedId, onSelect }: Props) {
+export function GanttView({ model, planId, planRisk, factSprintOf, selectedId, onSelect }: Props) {
   const [groupParam, setGroupParam] = useParam('group')
   const [team, setTeam] = useParam('team')
   const [decision, setDecision] = useParam('decision')
@@ -58,7 +58,8 @@ export function GanttView({ model, planId, risks, factSprintOf, selectedId, onSe
   const placement = useMemo(() => (USE_MOCKS ? loadPlacement(planId) : {}), [planId])
   const [collapsed, setCollapsed] = useState<string[]>([])
 
-  const riskById = useMemo(() => new Map(risks.map((risk) => [risk.task.task_id, risk])), [risks])
+  // задачи плана с единственным носителем роли — из ручки GET /plans/{id}/bus-risk (020-гейта)
+  const riskById = useMemo(() => new Set((planRisk?.tasks ?? []).map((t) => t.task_id)), [planRisk])
   const all = [...model.tasks.values()]
   const teams = [...new Set(all.map((task) => task.team_id).filter(Boolean))].sort()
   const teamDetails = useTeamDetails(teams)

@@ -9,7 +9,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { errorHint, errorTitle } from '@/components/ui/States'
 import { fmt } from '@/lib/format'
 import { formatSprints, type PlanModel } from '@/lib/planModel'
-import { companyRoleHolders } from './busRisk'
+import { usePlanBusRisk } from '@/api/queries'
 
 /** Часть задачи может получить < 0,05 SP (часы легли, SP округлились) — «0» здесь вводит в заблуждение */
 const fmtSp = (sp: number | null) => (sp !== null && sp > 0 && sp < 0.05 ? '<0,1' : sp === 0 ? '<0,1' : fmt(sp))
@@ -35,8 +35,10 @@ export function TaskPanelContent({ model, planId, taskId, tasksInfo, busFactor, 
   const reason = task?.reason
   const inPlan = task && task.sprints.length > 0
   const roleHours = task?.role_hours ?? info?.role_hours ?? {}
-  const holders = companyRoleHolders(busFactor)
-  const singleRoles = Object.keys(roleHours).filter((r) => holders.get(r.toLowerCase())?.length === 1)
+  // носители/риск-ключи задачи — из ручки GET /plans/{id}/bus-risk (020-гейта, не клиентский расчёт)
+  const planRisk = usePlanBusRisk(planId)
+  const riskTask = planRisk.data?.tasks.find((t) => t.task_id === taskId)
+  const singleRoles = riskTask?.at_risk_keys ?? []
 
   const whereIs = (id: string) => {
     const t = model.tasks.get(id)
@@ -120,7 +122,13 @@ export function TaskPanelContent({ model, planId, taskId, tasksInfo, busFactor, 
             <ShieldAlert aria-hidden /> Риск Bus Factor
           </div>
           <p>
-            {singleRoles.map((r) => `${r} — только ${holders.get(r.toLowerCase())![0]}`).join('; ')}. При уходе носителя задача окажется под угрозой.
+            {singleRoles
+              .map((r) => {
+                const hs = (riskTask?.holders?.[r] ?? []).join(', ')
+                return `${r} — ${hs.length ? `только ${hs[0]}` : 'носителя роли нет (виртуальный держатель)'}`
+              })
+              .join('; ')}.
+            При уходе носителя задача окажется под угрозой.
           </p>
         </div>
       )}
@@ -140,12 +148,12 @@ export function TaskPanelContent({ model, planId, taskId, tasksInfo, busFactor, 
               {Object.entries(roleHours)
                 .sort((a, b) => b[1] - a[1])
                 .map(([role, hours]) => {
-                  const h = holders.get(role.toLowerCase())
+                  const h = riskTask?.holders?.[role] ?? []
                   return (
                     <tr key={role}>
                       <td>{role}</td>
                       <td className="num tabular">{fmt(hours)}</td>
-                      <td className="num tabular" data-over={h?.length === 1 || !h ? 'true' : undefined}>
+                      <td className="num tabular" data-over={h.length === 1 || !h ? 'true' : undefined}>
                         {h ? h.length : busFactor ? '0' : '…'}
                       </td>
                     </tr>

@@ -181,6 +181,20 @@ export interface BusFactorReport {
   methodology: string
 }
 
+/** GET /plans/{id}/bus-risk — задачи плана, зависящие от ролей с единственным носителем (change 015-гейт). */
+export interface PlanBusRiskTask {
+  task_id: string
+  summary: string
+  sprint_no: number | null
+  at_risk_keys: string[]
+  holders: Record<string, string[]>
+}
+
+export interface PlanBusRisk {
+  total_at_risk: number
+  tasks: PlanBusRiskTask[]
+}
+
 export interface StarMapSummary {
   teams: TeamOverview[]
   fte_distribution: Record<string, number>

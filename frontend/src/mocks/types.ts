@@ -14,6 +14,9 @@ export interface ItemRow {
   sprint_no: number | null
   reason: string
   planned_sp: number | null
+  /** pin (016): закрепление задачи за спринтом/носителем */
+  pinned_sprint?: number | null
+  pinned_engineer_id?: string | null
 }
 
 export interface PlanRow {
