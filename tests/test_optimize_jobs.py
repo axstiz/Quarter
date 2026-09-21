@@ -21,8 +21,12 @@ async def _seed_world(session, velocity: float = 10.0) -> None:
     """Два ToDo-задачи по 5 SP (роль Dev 20 ч), один Dev-инженер, история скорости.
 
     Идемпотентно: БД общая для всех тестов, строки-фикстуры пересоздаются.
+    Факты спринтов тоже чистятся (change 026): выполненные по факту задачи
+    исключаются из снапшота — иначе стабилные optimize-тесты ломаются.
     """
+    from src.db.models import SprintFactORM
     await session.execute(delete(OptimizationJobORM).where(OptimizationJobORM.workspace_id == "default"))
+    await session.execute(delete(SprintFactORM).where(SprintFactORM.workspace_id == "default"))
     await session.execute(delete(TaskORM).where(TaskORM.task_id.in_(["T-1", "T-2"])))
     await session.execute(delete(EngineerORM).where(EngineerORM.engineer_id.in_(["E-1", "E-2"])))
     await session.execute(delete(TeamHistoryORM).where(TeamHistoryORM.team_id == "Team-A"))
@@ -52,14 +56,16 @@ async def _generate_plan(auth) -> str:
 
 async def _solver_draft_valid(snapshot: dict) -> dict:
     """Валидный черновик: размещаем только тестовые T-1/T-2 (в БД может лежать
-    полный dataset из других тестов — те задачи solver как бы не выбрал)."""
+    полный dataset из других тестов — те задачи solver как бы не выбрал).
+    Спринты берутся из снапшота (change 026: после фактов горизонт сужен)."""
     assignments = []
-    for idx, task in enumerate((t for t in snapshot["tasks"] if t["task_id"] in {"T-1", "T-2"}), start=1):
+    sprints = snapshot["sprints"]
+    for idx, task in enumerate((t for t in snapshot["tasks"] if t["task_id"] in {"T-1", "T-2"})):
         assignments.append({
             "part_id": f"{task['task_id']}#1",
             "task_id": task["task_id"],
             "part": 1,
-            "sprint": idx,
+            "sprint": sprints[min(idx, len(sprints) - 1)],
             "team_id": task["team_id"],
         })
     return {
@@ -267,3 +273,61 @@ async def test_optimize_heuristic_fallback(auths, monkeypatch):
         assert job["plan_id"] != plan_id
         jr = await ac.get(f"/api/v1/plans/optimize/{job['job_id']}", headers=auth)
         assert jr.json()["report"]["mode"] == "heuristic"
+
+# --- change 026: оптимизация от фактов и суженного горизонта ---------------
+
+async def _load_fact_and_recompute(auth, plan_id: str) -> str:
+    """Факт спринта 1 (T-1 выполнена) → пересчёт → id новой версии."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.post(f"/api/v1/plans/{plan_id}/sprints/1/facts", headers=auth,
+                          json={"completed_sp": 5.0, "completed_task_ids": ["T-1"], "notes": "026"})
+        assert r.status_code == 200, r.text
+        return r.json()["new_plan_id"]
+
+
+@pytest.mark.asyncio
+async def test_optimize_after_fact_skips_done_and_past_sprints(auths, monkeypatch):
+    """3.1 solver-режим: выполненная по факту задача не планируется, прошедшие спринты пусты."""
+    from src.db.session import SessionLocal
+    async with SessionLocal() as session:
+        await _seed_world(session)
+    monkeypatch.setattr("src.services.optimize_plan.solve_sidecar", _solver_draft_valid)
+    auth = auths["editor"]
+    plan_id = await _generate_plan(auth)
+    recomputed = await _load_fact_and_recompute(auth, plan_id)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.post("/api/v1/plans/optimize", headers=auth, json={"plan_id": recomputed})
+        assert r.status_code == 200, r.text
+        job = r.json()
+        assert job["status"] == "ready"
+        plan = await ac.get(f"/api/v1/plans/{job['plan_id']}", headers=auth)
+        items = [t for s in plan.json()["sprints"] for t in s["tasks"]]
+        assert "T-1" not in {i["task_id"] for i in items}, "выполненная задача переиграна"
+        assert all((i["sprint_no"] or 0) >= 2 for i in items), "item в прошедшем спринте"
+
+
+@pytest.mark.asyncio
+async def test_optimize_heuristic_after_fact_skips_done_and_past_sprints(auths, monkeypatch):
+    """3.2 heuristic-режим: те же инварианты без solver'а."""
+    from src.db.session import SessionLocal
+    from src.services.optimizer_client import SolverUnavailable
+
+    async def _unavailable(snapshot) -> dict:
+        raise SolverUnavailable("sidecar недоступен (026)")
+
+    async with SessionLocal() as session:
+        await _seed_world(session)
+    monkeypatch.setattr("src.services.optimize_plan.solve_sidecar", _unavailable)
+    auth = auths["editor"]
+    plan_id = await _generate_plan(auth)
+    recomputed = await _load_fact_and_recompute(auth, plan_id)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.post("/api/v1/plans/optimize", headers=auth, json={"plan_id": recomputed})
+        assert r.status_code == 200, r.text
+        job = r.json()
+        assert job["status"] == "ready"
+        assert job["mode"] == "heuristic"
+        plan = await ac.get(f"/api/v1/plans/{job['plan_id']}", headers=auth)
+        items = [t for s in plan.json()["sprints"] for t in s["tasks"]]
+        assert "T-1" not in {i["task_id"] for i in items}
+        assert all((i["sprint_no"] or 0) >= 2 for i in items)

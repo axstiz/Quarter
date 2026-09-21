@@ -86,3 +86,38 @@ def test_presplit_task_without_role_hours_single_part():
     parts = snap["tasks"][0]["parts"]
     assert len(parts) == 1
     assert parts[0]["role_hours"] == {}
+
+
+def test_snapshot_done_filter_and_narrowed_horizon():
+    """change 026: done_ids исключаются из снапшота, горизонт сужается."""
+    tasks = {
+        "T-A": _task("T-A", sp=5.0, hh=50.0, role_hours={"Разработчик": 50.0}),
+        "T-B": _task("T-B", sp=5.0, hh=50.0, role_hours={"Разработчик": 50.0}),
+        "T-C": _task("T-C", sp=5.0, hh=50.0, role_hours={"Разработчик": 50.0}, status="Done"),
+    }
+    engineers = [
+        Engineer(engineer_id="ENG-1", team_id="Team-A", role="Разработчик", capacity_rate=1.0),
+    ]
+    history = [TeamHistory(team_id="Team-A", snapshot_date="2026-06-01",
+                           velocity_achieved=100.0, planned_sp=100.0)]
+    snap = build_snapshot(tasks, engineers, history, [],
+                          done_ids=frozenset({"T-B"}), first_free_sprint=2)
+    ids = {t["task_id"] for t in snap["tasks"]}
+    assert ids == {"T-A"}, "done_ids и data-Done должны отсутствовать в снапшоте"
+    assert snap["sprints"] == list(range(2, 7)), "горизонт сужается до first_free_sprint..6"
+
+
+def test_presplit_respects_team_sp_capacity():
+    """change 026: SP части не должна превышать ёмкость команды —
+    задача SP 10 (20 ч, 1 часть по часам) при ёмкости 8 SP → 2 части."""
+    task = _task("T-BIG-SP", sp=10.0, hh=20.0, role_hours={"Разработчик": 20.0})
+    engineers = [
+        Engineer(engineer_id="ENG-1", team_id="Team-A", role="Разработчик", capacity_rate=1.0),
+    ]
+    history = [TeamHistory(team_id="Team-A", snapshot_date="2026-06-01",
+                           velocity_achieved=10.0, planned_sp=10.0)]  # ёмкость 8
+    snap = build_snapshot({task.task_id: task}, engineers, history, [])
+    parts = snap["tasks"][0]["parts"]
+    assert len(parts) == 2, "атомарная часть SP 10 > 8 не размещается — режем по ёмкости"
+    assert all(p["story_points"] <= 8.0 + 0.01 for p in parts)
+    assert abs(sum(p["story_points"] for p in parts) - 10.0) < 0.02

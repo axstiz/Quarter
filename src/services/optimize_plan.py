@@ -157,10 +157,13 @@ def _normalize_draft(response: dict, snapshot: dict, tasks: dict[str, Task],
     for (task_id, part), info in part_info.items():
         if (task_id, part) not in seen_parts:
             partial_hh[task_id] += sum((info.get("role_hours") or {}).values())
+    # postponed — только задачи в области снапшота (change 026): выполненные
+    # по фактам/data-Done в расстановку не входят ни planned, ни postponed
+    snapshot_ids = {t["task_id"] for t in snapshot["tasks"]}
     postponed = [
         {"task_id": tid, "reason": "не попала в расстановку solver"}
         for tid in sorted(tasks)
-        if tasks[tid].status != "Done" and tid not in item_tasks
+        if tid in snapshot_ids and tid not in item_tasks
     ]
     # переносы: «инженер остался в своей команде» (to_team_id null или == from) — НЕ перенос,
     # БД-модель требует not-null; честные переносы только к другой команде
@@ -305,8 +308,16 @@ def allocate_engineers(draft: dict, tasks: dict[str, Task], engineers: list[Engi
 
 
 def _heuristic_draft(tasks: dict[str, Task], engineers: list[Engineer],
-                     history: list[TeamHistory], deps: list[tuple[str, str]]) -> dict:
-    plan = generate_plan(PlannerInput(list(tasks.values()), engineers, history, deps), strategy="metrics")
+                     history: list[TeamHistory], deps: list[tuple[str, str]],
+                     done_ids: frozenset[str] = frozenset(),
+                     first_free_sprint: int = 1) -> dict:
+    """Эвристический черновик (change 026): тот же done-фильтр и суженный
+    горизонт, что у solver-снапшота, — расстановка только остатка квартала."""
+    todo = {tid: t for tid, t in tasks.items()
+            if t.status != "Done" and tid not in done_ids}
+    plan = generate_plan(
+        PlannerInput(list(todo.values()), engineers, history, deps),
+        first_free_sprint=first_free_sprint, strategy="metrics")
     items = []
     for s in plan.sprints:
         for it in s.items:
@@ -471,16 +482,31 @@ async def apply_draft(session, workspace_id: str, source_plan_id: str, draft: di
 
 async def run_optimization(session, workspace_id: str, plan_id: str, author_id: str,
                            require_staffing: bool) -> dict:
-    """Полный проход оптимизации; результат идёт в job.result (статус готовит роут)."""
+    """Полный проход оптимизации; результат идёт в job.result (статус готовит роут).
+
+    change 026: снапшот/эвристика строятся от контекста текущей версии —
+    выполненные по фактам и data-Done задачи исключаются, горизонт сужается
+    до спринтов после recomputed_after_sprint (без фактов — 1..6, как раньше).
+    """
     tasks_map, engineers, history, deps = await load_world(session, workspace_id=workspace_id)
-    snapshot = build_snapshot(tasks_map, engineers, history, deps)
+    source = await load_plan_orm(session, plan_id, workspace_id)
+    first_free = ((source.recomputed_after_sprint if source else 0) or 0) + 1
+    fact_rows = (await session.execute(select(SprintFactORM).where(
+        SprintFactORM.workspace_id == workspace_id))).scalars().all()
+    done_ids = frozenset(
+        {str(x) for f in fact_rows for x in (f.completed_task_ids or [])}
+        | {t.task_id for t in tasks_map.values() if t.status == "Done"}
+    )
+    snapshot = build_snapshot(tasks_map, engineers, history, deps,
+                              done_ids=done_ids, first_free_sprint=first_free)
 
     try:
         response = await solve_sidecar(snapshot)
         draft = _normalize_draft(response, snapshot, tasks_map, mode="solver")
     except SolverUnavailable as e:
         logger.warning("оптимизация без solver (%s): режим эвристики", e)
-        draft = _heuristic_draft(tasks_map, engineers, history, deps)
+        draft = _heuristic_draft(tasks_map, engineers, history, deps,
+                                 done_ids=done_ids, first_free_sprint=first_free)
 
     if draft["mode"] == "solver":
         # макро-гейты на черновик solver ДО распределения: нарушение → 422 (change 018)
