@@ -162,6 +162,19 @@ async def stage_import(session: AsyncSession, job, workspace_id: str = "default"
         snapshot = _date_conv(row.get("snapshot_date"))
         if not team or not snapshot:
             continue
+        # bugfix 025: мерж по ключу — повторный импорт не дублирует историю velocity
+        existing = (await session.execute(select(TeamHistoryORM).where(
+            TeamHistoryORM.workspace_id == workspace_id,
+            TeamHistoryORM.team_id == team,
+            TeamHistoryORM.snapshot_date == snapshot,
+        ))).scalar_one_or_none()
+        if existing:
+            if existing.source == "manual":
+                continue
+            existing.velocity_achieved = _f(row.get("velocity_achieved"), existing.velocity_achieved)
+            existing.planned_sp = _f(row.get("planned_sp"), existing.planned_sp)
+            history_rows += 1
+            continue
         session.add(TeamHistoryORM(
             workspace_id=workspace_id,
             team_id=team,
@@ -172,32 +185,45 @@ async def stage_import(session: AsyncSession, job, workspace_id: str = "default"
         history_rows += 1
     counts["team_history"] = history_rows
 
-    n_req = 0
+    # bugfix 025: батч-дедуп по (task_id, role) внутри импорта…
+    req_keys: dict[tuple[str, str], dict] = {}
     for rr in role_reqs:
         if isinstance(rr.get("rows"), dict) and rr.get("role") and not str(rr["role"]).lower().startswith("итого"):
+            role_name = str(rr["role"])
             for tid, hours in rr["rows"].items():
                 hours_num = _f(str(hours or ""))
                 if hours_num <= 0 or not tid:
                     continue
-                session.add(RoleRequirementORM(
-                    workspace_id=workspace_id, task_id=tid, role=str(rr["role"]), hours=hours_num, source="imported"))
-                n_req += 1
+                req_keys[(tid, role_name)] = {"task_id": tid, "role": role_name, "hours": hours_num}
             continue
         if isinstance(rr.get("role_hours"), dict) and rr.get("task_id"):
             for role, hours in rr["role_hours"].items():
                 hours_num = _f(str(hours or ""))
                 if hours_num <= 0:
                     continue
-                session.add(RoleRequirementORM(
-                    workspace_id=workspace_id, task_id=str(rr["task_id"]), role=role, hours=hours_num, source="imported"))
-                n_req += 1
-        elif rr.get("role") is None and rr.get("task_id"):
+                req_keys[(str(rr["task_id"]), role)] = {"task_id": str(rr["task_id"]), "role": role, "hours": hours_num}
+        elif rr.get("task_id"):
+            role_name = str(rr.get("role") or "")
             hours = _f(str(rr.get("hours") or ""))
-            if hours <= 0:
+            if hours > 0 and role_name:
+                req_keys[(str(rr["task_id"]), role_name)] = {"task_id": str(rr["task_id"]), "role": role_name, "hours": hours}
+    n_req = 0
+    for (tid, role_name), req in sorted(req_keys.items()):
+        hours_num = req["hours"]
+        # мерж по (workspace, task_id, role): imported → обновление, manual → пропуск
+        existing = (await session.execute(select(RoleRequirementORM).where(
+            RoleRequirementORM.workspace_id == workspace_id,
+            RoleRequirementORM.task_id == tid,
+            RoleRequirementORM.role == role_name,
+        ))).scalar_one_or_none()
+        if existing:
+            if existing.source == "manual":
                 continue
+            existing.hours = hours_num
+        else:
             session.add(RoleRequirementORM(
-                workspace_id=workspace_id, task_id=str(rr["task_id"]), role=str(rr.get("role") or ""), hours=hours, source="imported"))
-            n_req += 1
+                workspace_id=workspace_id, task_id=tid, role=role_name, hours=hours_num, source="imported"))
+        n_req += 1
     counts["role_requirements"] = n_req
 
     await session.commit()
