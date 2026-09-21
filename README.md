@@ -33,7 +33,7 @@ curl -sf http://localhost:8000/healthz
 
 # 3) залить демо-датасет (idempotentно, пересоздаёт данные; нужна демо-сессия editor/admin)
 TOKEN=$(curl -s -X POST http://localhost:8000/auth/demo-login -H 'Content-Type: application/json' \
-  -d '{"role": "admin"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])'
+  -d '{"role": "admin"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
 curl -X POST http://localhost:8000/api/v1/data/import -H "Authorization: Bearer $TOKEN"
 # или из UI: /login → демо-роль editor/admin → кнопка импорта на /data
 
@@ -59,6 +59,23 @@ docker compose down -v                                          # + удалит
 Старый `pgdata` с прошлой схемой (без колонок новых change'ей) пересоздавать через `down -v`,
 затем импорт демо-датасета (шаг 3). **Обязательно после change 025** (составные PK
 `tasks`/`teams`): старая схема несовместима, alembic-миграции нет — только пересоздание.
+
+### Конфигурация (.env)
+
+Сервисы `api` и `worker` подхватывают `.env` из корня репо (шаблон — `example.env`;
+локальный запуск через uv читает его же). Ключевые переменные:
+
+| Переменная | Default | За что отвечает |
+|---|---|---|
+| `POSTCODE_DATABASE_URL` | postgres://…@db:5432 (в compose) | подключение к БД |
+| `POSTCODE_JOBS_MODE` | `auto` | `queue` — только Redis/arq, `sync` — только в процессе |
+| `POSTCODE_LLM_PROVIDER` | `gigachat` | `gigachat` \| `ollama` \| `none` (см. «LLM-провайдеры») |
+| `GIGACHAT_CLIENT_ID` / `GIGACHAT_CLIENT_SECRET` | — | ключи GigaChat (без префикса POSTCODE_) |
+| `POSTCODE_OLLAMA_BASE_URL` / `POSTCODE_OLLAMA_MODEL` | `http://localhost:11434` | локальный Ollama |
+| `POSTCODE_OPTIMIZER_BASE_URL` | `http://optimizer:8080` (в compose) | solver-сайдкар |
+
+Ollama на хосте из контейнера: `POSTCODE_OLLAMA_BASE_URL=http://host.docker.internal:11434`
+(на Linux добавить `extra_hosts: ["host.docker.internal:host-gateway"]` в сервис api).
 
 ### Локально (uv)
 
