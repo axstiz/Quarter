@@ -62,6 +62,25 @@ auth_reader = _make_role_fixture("reader")
 
 
 @pytest_asyncio.fixture()
+async def db():
+    """Только перебиндить глобальный engine на loop текущего теста, без логина."""
+    import src.db.session as session_mod
+    from src.db.session import init_db
+    from src.core.config import settings
+
+    engine = create_async_engine(settings.database_url, echo=False)
+    old = (session_mod.engine, session_mod.SessionLocal)
+    session_mod.engine = engine
+    session_mod.SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        await init_db()
+        yield
+    finally:
+        await engine.dispose()
+        session_mod.engine, session_mod.SessionLocal = old
+
+
+@pytest_asyncio.fixture()
 async def auths() -> dict[str, dict]:
     """Все три роли сразу: {'admin': ..., 'editor': ..., 'reader': ...}."""
     import src.db.session as session_mod

@@ -50,7 +50,7 @@ async def test_auth_unauthorized():
 
 
 @pytest.mark.asyncio
-async def test_invalid_email_and_admin_escalation():
+async def test_invalid_email_and_admin_escalation(db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Invalid email format (e.g. exampletest.ru)
         bad_email = await client.post(
@@ -60,9 +60,10 @@ async def test_invalid_email_and_admin_escalation():
         assert bad_email.status_code == 422
 
         # Registration requesting 'admin' role should be constrained to 'editor'
+        import uuid
         admin_req = await client.post(
             "/auth/register",
-            json={"email": "hacker@domain.com", "password": "secure_password_123", "role": "admin"},
+            json={"email": f"hacker-{uuid.uuid4().hex[:8]}@domain.com", "password": "secure_password_123", "role": "admin"},
         )
         assert admin_req.status_code == 201
         assert admin_req.json()["user"]["role"] == "editor"
