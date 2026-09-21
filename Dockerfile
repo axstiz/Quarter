@@ -15,6 +15,6 @@ ENV POSTCODE_DATABASE_URL="postgresql+asyncpg://postcode:postcode@db:5432/postco
 
 EXPOSE 8000
 HEALTHCHECK --interval=3s --timeout=3s --retries=20 \
-  CMD curl -sf http://localhost:8000/healthz || exit 1
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')" || exit 1
 
 CMD ["uv", "run", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
