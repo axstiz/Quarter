@@ -105,6 +105,46 @@ def test_solve_two_runs_same_seed_identical_draft():
         compose("rm", "-f", "optimizer", check=False)
 
 
+PRESPLIT_SNAPSHOT = {
+    "sprints": [1, 2, 3, 4, 5, 6],
+    "team_velocities": [{"team_id": "Team-A", "velocity": 100}],
+    "tasks": [
+        {
+            "task_id": "T-190", "parent_id": "INI-1", "status": "ToDo", "team_id": "Team-A",
+            "story_points": 19, "estimated_hh": 190, "spent_time": 0, "priority": 1,
+            "planned_in_sprint": True,
+            "parts": [
+                {"part": 1, "story_points": 8.0, "role_hours": {"разработчик": 80.0}},
+                {"part": 2, "story_points": 8.0, "role_hours": {"разработчик": 80.0}},
+                {"part": 3, "story_points": 3.0, "role_hours": {"разработчик": 30.0}},
+            ],
+        },
+    ],
+    "dependencies": [],
+    "engineers": [
+        {"engineer_id": "ENG-1", "team_id": "Team-A", "role": "разработчик", "capacity_rate": 1.0,
+         "sole_holder_in_team": True},
+    ],
+}
+
+
+@pytest.mark.solver
+@pytest.mark.skipif(not docker_available(), reason="docker daemon недоступен")
+def test_solve_accepts_presplit_parts():
+    """change 022, задача 1.2: solver принимает снапшот с pre-split частями (200)."""
+    try:
+        compose("up", "-d", "--build", "--wait", "optimizer")
+        body = json.dumps(PRESPLIT_SNAPSHOT)
+        out = _solver_post(body, capture_code=True)
+        assert out.stdout.strip() == "200"
+        resp = json.loads(_solver_post(body).stdout)
+        parts = {a.get("part") for a in resp.get("assignments", [])}
+        assert parts and parts <= {1, 2, 3}, f"assignments ссылаются на части 1..3: {parts}"
+    finally:
+        compose("stop", "optimizer", check=False)
+        compose("rm", "-f", "optimizer", check=False)
+
+
 @pytest.mark.solver
 @pytest.mark.skipif(not docker_available(), reason="docker daemon недоступен")
 def test_solve_rejects_malformed_snapshot_with_400():
