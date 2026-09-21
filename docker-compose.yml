@@ -55,7 +55,9 @@ services:
     environment:
       OPTIMIZER_PORT: 8080
       OPTIMIZER_SEED: 42
-      OPTIMIZER_TIME_LIMIT_SECONDS: 30
+      # change 029: бюджет 180 с + unimproved 30 с — время довести до hard=0
+      OPTIMIZER_TIME_LIMIT_SECONDS: 180
+      OPTIMIZER_UNIMPROVED_LIMIT_SECONDS: 30
       OPTIMIZER_STAFFING_GAIN_THRESHOLD: 0.05
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
