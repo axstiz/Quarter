@@ -18,6 +18,7 @@ from src.db.importer import import_dataset, reset_dataset_tables
 from src.db.models import (
     DependencyORM,
     EngineerORM,
+    OptimizationJobORM,
     PlanItemORM,
     PlanORM,
     ReferenceValueORM,
@@ -482,6 +483,105 @@ async def recompute_endpoint(plan_id: str, after_sprint: int = 0,
             "parent_plan_id": plan_id, "after_sprint": after_sprint}
 
 
+# --- оптимизация плана (change 018, задачи 2.1–2.5) -----------------------
+
+ACTIVE_JOB_STATUSES = ("queued", "solving")
+
+
+@router.post("/plans/optimize")
+async def optimize_plan_endpoint(body: dict | None = None,
+                                 ctx: Context = Depends(require_permission("plans_optimize"))) -> dict:
+    """Запуск job оптимизации текущей версии: queued → solving → ready | failed.
+
+    ready создаёт новую версию плана (strategy=optimization) и возвращает plan_id.
+    Переносы людей в черновике требуют права plans_optimize_staffing (admin).
+    """
+    from src.services.optimize_plan import (
+        DraftValidationError,
+        StaffingPermissionError,
+        run_optimization,
+    )
+
+    plan_id = (body or {}).get("plan_id")
+    if not plan_id:
+        raise HTTPException(status_code=422, detail="plan_id обязателен")
+    ws = ctx.workspace_id
+    if not await get_plan_orm(ctx.session, plan_id, ws):
+        raise HTTPException(status_code=404, detail="план не найден")
+
+    active = (await ctx.session.execute(select(OptimizationJobORM).where(
+        OptimizationJobORM.workspace_id == ws,
+        OptimizationJobORM.status.in_(ACTIVE_JOB_STATUSES),
+    ))).scalars().first()
+    if active is not None:
+        raise HTTPException(status_code=409, detail="оптимизация уже выполняется")
+
+    job = OptimizationJobORM(workspace_id=ws, plan_id=plan_id, status="queued")
+    ctx.session.add(job)
+    await ctx.session.commit()
+    await ctx.session.refresh(job)
+    job.status = "solving"
+    await ctx.session.commit()
+
+    try:
+        result = await run_optimization(
+            ctx.session, ws, plan_id, ctx.user.id, require_staffing=(ctx.role == "admin"))
+    except DraftValidationError as e:
+        job.status = "failed"
+        job.error = f"валидация черновика solver не прошла: {e}"
+        await ctx.session.commit()
+        raise HTTPException(status_code=422, detail={
+            "error": job.error, "job_id": job.job_id,
+        })
+    except StaffingPermissionError as e:
+        job.status = "failed"
+        job.error = str(e)
+        await ctx.session.commit()
+        raise HTTPException(
+            status_code=403,
+            detail="Отказано в доступе: требуется разрешение 'plans_optimize_staffing'",
+        )
+    except Exception as e:
+        logger.exception("оптимизация %s упала", plan_id)
+        job.status = "failed"
+        job.error = str(e)
+        await ctx.session.commit()
+        raise HTTPException(status_code=500, detail=f"оптимизация не удалась: {e}")
+
+    job.status = "ready"
+    job.mode = result["mode"]
+    job.result = result
+    job.plan_id = plan_id
+    await ctx.session.commit()
+    return {
+        "status": "ready", "job_id": job.job_id,
+        "plan_id": result["plan_id"], "mode": result["mode"],
+    }
+
+
+@router.get("/plans/optimize/{job_id}")
+async def optimize_job_status(job_id: str, ctx: Context = Depends(require_context)) -> dict:
+    """Статус job + результат: отчёт до/после, переносы, score-разбивка."""
+    job = (await ctx.session.execute(select(OptimizationJobORM).where(
+        OptimizationJobORM.job_id == job_id))).scalar_one_or_none()
+    if not job or job.workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=404, detail="job не найден")
+    result = job.result or {}
+    return {
+        "job_id": job.job_id,
+        "status": job.status,
+        "mode": job.mode,
+        "error": job.error or None,
+        "plan_id": result.get("plan_id"),
+        "report": result.get("report"),
+        "staffing_moves": result.get("staffing_moves", []),
+        "score": result.get("score"),
+        "score_breakdown": result.get("score_breakdown", []),
+        "created_at": str(job.created_at),
+        "updated_at": str(job.updated_at),
+    }
+
+
 def _recomputed_plan(plan_before: Plan, done_task_ids: set[str]) -> Plan:
     """Виртуальный план после факта: выполненные — done_actual; недоделанные
     сдвигаются на спринт позже (или postponed за пределами квартала)."""
@@ -784,6 +884,7 @@ async def plans_list(ctx: Context = Depends(require_context)) -> list[dict]:
             "recomputed_after_sprint": r.recomputed_after_sprint,
             "created_by": r.created_by,
             "created_at": str(r.created_at),
+            "strategy": r.strategy,
         })
     return out
 

@@ -23,6 +23,8 @@ DEFAULT_MATRIX: dict[str, set[str]] = {
     "sprint_facts": {"admin", "editor"},
     "recompute": {"admin", "editor"},
     "plans_generate": {"admin", "editor"},
+    "plans_optimize": {"admin", "editor"},         # запуск оптимизации (change 018)
+    "plans_optimize_staffing": {"admin"},          # применение переносов людей (change 018)
     "workspace_admin": {"admin"},
     "members_admin": {"admin"},
 }
