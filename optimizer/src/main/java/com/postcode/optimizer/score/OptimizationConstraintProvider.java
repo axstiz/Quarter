@@ -26,6 +26,8 @@ import java.util.function.Function;
 public class OptimizationConstraintProvider implements ConstraintProvider {
 
     public static final double CAPACITY_UTILIZATION = 0.8;
+    /** Допуск сравнения float-сумм против бэк-валидации (runtime округление Timefold-коллекторов). */
+    static final double SP_EPSILON = 1e-6;
     static final long WEIGHT_INITIATIVE = 100_000;
     static final long WEIGHT_STRATEGIC_SP = 1_000;
     static final double PI_MIN_UTILIZATION = 0.6;
@@ -132,19 +134,23 @@ public class OptimizationConstraintProvider implements ConstraintProvider {
                 .asConstraint("priorityOrderPenalty");
     }
 
-    /** Ёмкость команды по SP: сумма планируемых SP в спринте не превышает velocity × 0,8. */
+    /** Ёмкость команды по SP: сумма планируемых SP в спринте не превышает velocity × 0,8.
+     *  Важно: без Math.round — бэковская валидация (capacity = velocity×0,8, е.g. 12.8) отвергает
+     *  раскладку, где сумма 13.0 > 12.8, а округление Java-порога до 13 её «прощало». */
     Constraint teamSpCapacity(ConstraintFactory factory) {
         return factory.forEach(TaskPartAssignment.class)
                 .filter(a -> a.getSprint() != null)
                 .groupBy(
                         TaskPartAssignment::getTeamId,
                         TaskPartAssignment::getSprint,
-                        ConstraintCollectors.sum(a -> Math.round(a.getStoryPoints())))
+                        ConstraintCollectors.sum((TaskPartAssignment a) -> Math.round(a.getStoryPoints() * 10L)))
                 .join(TeamVelocity.class,
-                        Joiners.equal((teamId, sprintId, sp) -> teamId, TeamVelocity::getTeamId))
-                .filter((teamId, sprintId, sp, velocity) -> sp > Math.round(velocity.getPlannedSp() * CAPACITY_UTILIZATION))
+                        Joiners.equal((teamId, sprintIdTenths, spTenths) -> teamId, TeamVelocity::getTeamId))
+                .filter((teamId, sprintIdTenths, spTenths, velocity) ->
+                        spTenths > Math.round(velocity.getPlannedSp() * CAPACITY_UTILIZATION * 10L))
                 .penalize(HardSoftScore.ONE_HARD,
-                        (teamId, sprintId, sp, velocity) -> sp - Math.round(velocity.getPlannedSp() * CAPACITY_UTILIZATION))
+                        (teamId, sprintIdTenths, spTenths, velocity) ->
+                                spTenths - Math.round(velocity.getPlannedSp() * CAPACITY_UTILIZATION * 10L))
                 .asConstraint("teamSpCapacity");
     }
 
@@ -159,12 +165,14 @@ public class OptimizationConstraintProvider implements ConstraintProvider {
                 .groupBy(
                         RoleLoad::sprint,
                         RoleLoad::role,
-                        ConstraintCollectors.sum(load -> Math.round(load.hours())))
+                        ConstraintCollectors.sum((RoleLoad load) -> Math.round(load.hours() * 10L)))
                 .join(RoleCapacity.class,
-                        Joiners.equal((sprintId, role, hours) -> role, RoleCapacity::getRole))
-                .filter((sprintId, role, hours, capacity) -> hours > Math.round(capacity.getHours()))
+                        Joiners.equal((sprintIdTenths, role, hoursTenths) -> role, RoleCapacity::getRole))
+                .filter((sprintIdTenths, role, hoursTenths, capacity) ->
+                        hoursTenths > Math.round(capacity.getHours() * 10L))
                 .penalize(HardSoftScore.ONE_HARD,
-                        (sprintId, role, hours, capacity) -> hours - Math.round(capacity.getHours()))
+                        (sprintIdTenths, role, hoursTenths, capacity) ->
+                                hoursTenths - Math.round(capacity.getHours() * 10L))
                 .asConstraint("roleHoursCapacity");
     }
 

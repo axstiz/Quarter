@@ -151,10 +151,16 @@ def _normalize_draft(response: dict, snapshot: dict, tasks: dict[str, Task],
         for tid in sorted(tasks)
         if tasks[tid].status != "Done" and tid not in item_tasks
     ]
+    # переносы: «инженер остался в своей команде» (to_team_id null или == from) — НЕ перенос,
+    # БД-модель требует not-null; честные переносы только к другой команде
+    real_moves = [
+        m for m in response.get("staffing_moves", [])
+        if m.get("to_team_id") and m.get("from_team_id") and m.get("to_team_id") != m.get("from_team_id")
+    ]
     return {
         "items": items,
         "postponed": postponed,
-        "staffing_moves": response.get("staffing_moves", []),
+        "staffing_moves": real_moves,
         "score": response.get("score"),
         "score_breakdown": response.get("score_breakdown", []),
         "mode": mode,
