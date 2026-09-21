@@ -866,6 +866,112 @@ async def staffing_suggestions_endpoint(plan_id: str, ctx: Context = Depends(req
     return {"plan_id": plan_id, "suggestions": suggestions}
 
 
+@router.get("/plans/{plan_id}/advice")
+async def advice_endpoint(plan_id: str, comment: str | None = None,
+                          ctx: Context = Depends(require_context)) -> dict:
+    """AI-советник (change 015): одноразовые советы по сводке состояния плана.
+
+    comment (опционально, ≤ 500 симв.) — весь контекст прогона в одном комментарии
+    (например «ENG-405 заболел»); никогда не сохраняется и не влияет на план.
+    """
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
+    if not plan_orm:
+        raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
+    from pydantic import ValidationError
+    from src.ai.gigachat import GigaUnavailable, get_client
+    from src.services.metrics import compute_metrics_initiatives
+    from src.services.optimization import generate_staffing_suggestions
+
+    comment = (comment or "").strip()[:500]
+    items = await get_plan_items(ctx.session, plan_id)
+    plan = _plan_from_orm(plan_id, items)
+    tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
+    facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id == plan_id))).scalars().all()
+    initial = await _initial_plan_for(ctx.session, plan)
+    planned_sp_by_sprint = {s.sprint_no: sum(i.step_points_sp or 0.0 for i in s.items) for s in initial.sprints}
+    done_sp_by_sprint = {f.sprint_no: f.completed_sp for f in facts}
+    done_task_ids: list[str] = sorted({tid for f in facts for tid in (f.completed_task_ids or [])})
+    initial_items = [
+        {"task_id": i.task_id,
+         "parent_id": tasks[i.task_id].parent_id if i.task_id in tasks else None,
+         "step_points_sp": i.step_points_sp or 0.0,
+         "sprint_no": s.sprint_no}
+        for s in initial.sprints for i in s.items
+    ]
+    quarter_finished = len(facts) >= SPRINTS_PER_QUARTER
+    metrics_report = compute_metrics_initiatives(
+        initial_items, done_task_ids, planned_sp_by_sprint, done_sp_by_sprint,
+        quarter_finished=quarter_finished,
+    ).model_dump()
+
+    pinned_ids: set[str] = set()
+    for s in plan.sprints:
+        for it in s.items:
+            if it.pinned_sprint or it.pinned_engineer_id:
+                pinned_ids.add(it.task_id)
+
+    warnings = await _advice_warnings(plan_id, plan, plan_orm, tasks, deps, engineers, done_task_ids, ctx)
+    optimization_report = optimization_report_endpoint_auto(plan_id, plan, plan_orm, tasks, engineers, history, deps, metrics_report)
+    staffing = generate_staffing_suggestions(engineers, tasks)
+
+    from src.ai.pipelines.advisor import AdviceReport, fallback_advice, facts_json, llm_advice
+
+    snapshot = facts_json(warnings=warnings, metrics=metrics_report,
+                          optimization_report=optimization_report, staffing=staffing,
+                          comment=comment or None)
+    # pinned-задачи: в сводку не попадают «переносные» options — фильтр вывода
+    advice: list = []
+    mode = "fallback"
+    comment_considered = bool(comment)
+    client = get_client()
+    if client.enabled:
+        for attempt in (1, 2):
+            try:
+                advice = llm_advice(snapshot, client)
+                advice = [a for a in advice if not (set(a.affected_task_ids) & pinned_ids)]
+                advice = advice[:6]
+                mode = "llm"
+                break
+            except (ValidationError, ValueError, GigaUnavailable) as e:
+                logger.warning("advisor LLM attempt %s failed: %s", attempt, e)
+        else:
+            advice = fallback_advice(warnings, optimization_report, staffing, metrics_report, comment)
+    else:
+        advice = fallback_advice(warnings, optimization_report, staffing, metrics_report, comment)
+        advice = [a for a in advice if not (set(a.affected_task_ids) & pinned_ids)]
+
+    report = AdviceReport(mode=mode, comment_considered=bool(comment), advice=advice)
+    return report.model_dump()
+
+
+async def _advice_warnings(plan_id, plan, plan_orm, tasks, deps, engineers, done_task_ids, ctx):
+    """Сводка рисков (тот же compute_warnings, что в /warnings) + справочник причин."""
+    child = None
+    items = []
+    if plan_orm.parent_plan_id:
+        child = None  # советы строятся от текущей версии
+    done = set(done_task_ids)
+    after = _recomputed_plan(plan, done)
+    q_start = plan_orm.quarter_start or calculate_quarter_start(list(tasks.values()))
+    from src.services.replanner import compute_warnings
+
+    warnings = compute_warnings(plan, after, sorted(done), tasks, deps, engineers, quarter_start=q_start)
+    out = [w.model_dump() for w in warnings]
+    cat_rows = (await ctx.session.execute(select(ReferenceValueORM).where(
+        ReferenceValueORM.category == "deviation_reason",
+        ReferenceValueORM.workspace_id == ctx.workspace_id))).scalars().all()
+    from src.services.reasons import attach_reason_categories
+
+    return attach_reason_categories(out, [r.value for r in cat_rows if r.value != "Причины расхождения планов заказчика и исполнителя"])
+
+
+def optimization_report_endpoint_auto(plan_id, plan, plan_orm, tasks, engineers, history, deps, metrics_report):
+    baseline_plan = generate_plan(PlannerInput(list(tasks.values()), engineers, history, deps), strategy="priority")
+    from src.services.optimization import generate_optimization_report
+
+    return generate_optimization_report(plan, baseline_plan, tasks, metrics_report)
+
+
 @router.get("/star-map/summary")
 async def star_map(ctx: Context = Depends(require_context)) -> dict:
     tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
