@@ -23,5 +23,11 @@ dependencies = [
     "arq>=0.28.0",
 ]
 
+[tool.pytest.ini_options]
+markers = [
+    "solver: тяжёлые docker-compose тесты optimizer (поднимают профиль optimizer, минуты) — не в общем прогоне",
+]
+addopts = "-m 'not solver'"
+
 [tool.uv]
 package = false

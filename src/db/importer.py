@@ -79,6 +79,8 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path, workspace_id:
         ).scalars().all()
     }
     tasks_rows = read_csv(dataset_dir / "tasks.csv")
+    req_rows = read_csv(dataset_dir / "task_role_requirements.csv")
+    dep_rows = read_csv(dataset_dir / "task_dependencies.csv")
     for i, row in enumerate(tasks_rows):
         if row["task_id"] in existing_ids:
             continue
@@ -99,11 +101,35 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path, workspace_id:
             actual_start=_date(row.get("actual_start", "")),
             actual_end=_date(row.get("actual_end", "")),
         ))
+
+    # Политика автодополнения: задача, упомянутая в сметах/зависимостях,
+    # но отсутствующая в списке задач, считается выполненной (Done) —
+    # сметы по ней остаются как историческая справка, в планирование не входит.
+    known = {r["task_id"] for r in tasks_rows} | existing_ids
+    referenced = (
+        {r["task_id"] for r in req_rows}
+        | {r["blocking_task_id"] for r in dep_rows}
+        | {r["blocked_task_id"] for r in dep_rows}
+    )
+    orphans = sorted(t for t in referenced - known if t)
+    for tid in orphans:
+        session.add(TaskORM(
+            workspace_id=workspace_id,
+            task_id=tid,
+            team_id="",
+            status="Done",
+            summary=f"(задача {tid} отсутствует в списке; считается выполненной)",
+        ))
     counts["tasks"] = len(tasks_rows) - len(existing_ids & {r["task_id"] for r in tasks_rows})
+    if orphans:
+        counts["tasks_auto_done"] = len(orphans)
+
+    # FK task_role_requirements → tasks: сортировка unit-of-work между мапперами
+    # без relationship не гарантирована — сбрасываем задачи до требований явно.
     await session.flush()
 
     seen_deps = set()
-    for row in read_csv(dataset_dir / "task_dependencies.csv"):
+    for row in dep_rows:
         key = (row["blocking_task_id"], row["blocked_task_id"])
         if key in seen_deps or not all(key):
             continue
@@ -116,8 +142,10 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path, workspace_id:
         ))
     counts["dependencies"] = len(seen_deps)
 
-    valid_task_ids = {r["task_id"] for r in tasks_rows} | existing_ids
-    for row in read_csv(dataset_dir / "task_role_requirements.csv"):
+    # задачи-сироты теперь существуют (Done), но фильтр сохраняем на не-осиротевшие
+    # ссылки (кейсы, где сироты не создавались) — не ослаблять инвариант
+    valid_task_ids = {r["task_id"] for r in tasks_rows} | existing_ids | set(orphans)
+    for row in req_rows:
         if row["task_id"] not in valid_task_ids:
             continue
         session.add(RoleRequirementORM(
@@ -126,7 +154,7 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path, workspace_id:
             role=row["role"],
             hours=_f(row.get("hours", "")),
         ))
-    counts["role_requirements"] = len(read_csv(dataset_dir / "task_role_requirements.csv"))
+    counts["role_requirements"] = len(req_rows)
 
     for row in read_csv(dataset_dir / "engineers_profiles.csv"):
         session.add(EngineerORM(

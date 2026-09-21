@@ -232,6 +232,38 @@ uv run uvicorn src.main:app --reload  # JOBS_MODE=queue | sync | auto (default: 
 задачу через `uploaded → mapping → questions|ready`, делает повтор (2 попытки),
 по таймауту/ошибке — `failed` с причиной. Повторный прогон: `POST /api/v1/ai/normalize/{job_id}`.
 
+### Оптимизация плана solver'ом (change 018)
+
+Сайдкар Timefold (Java 21, порт 8080) живёт в compose-профиле `optimizer`:
+
+```bash
+docker compose --profile optimizer up -d --build   # сборка через host-сеть (Maven Central)
+docker compose --profile optimizer ps              # health: /health
+```
+
+Бэк ходит в сайдкар по `POSTCODE_OPTIMIZER_BASE_URL` (default `http://localhost:8080`),
+таймаут solve — `POSTCODE_OPTIMIZER_SOLVE_TIMEOUT_SEC` (default 60). Параметры solver:
+`OPTIMIZER_SEED` (фиксированный seed → детерминированный черновик),
+`OPTIMIZER_TIME_LIMIT_SECONDS`, `OPTIMIZER_STAFFING_GAIN_THRESHOLD` (порог выгоды переноса).
+
+Контракт: `POST /api/v1/plans/optimize {plan_id}` — job выполняется синхронно
+(queued → solving → ready|failed), `GET /api/v1/plans/optimize/{job_id}` — статус,
+отчёт метрик до/после (те же KPI, что в `/metrics`, change 013: % инициатив, флаги
+«в норме»), применённые переносы людей и score-разбивка по ограничениям.
+Результат — новая версия плана `strategy=optimization`; откат — селектором версий.
+
+**Деградация**: сайдкар недоступен → оптимизация отрабатывает эвристикой
+(жадная метрическая стратегия 012), режим помечен `heuristic`, ошибки нет.
+Черновик solver валидируется hard-правилами до записи версии (нарушение → 422,
+версия не создаётся). Переносы людей между командами — только admin
+(право `plans_optimize_staffing`), у editor — 403. Параллельный запуск в том же
+workspace → 409.
+
+**Демо-сценарий**: импорт данных → `POST /plans/generate` → кнопка «Оптимизировать»
+на `/plan` (или `curl -X POST /api/v1/plans/optimize -d '{"plan_id": "<id>"}'`) →
+новая версия с причинами «оптимизация (режим solver; score …)» →
+`GET /plans/optimize/<job_id>` показывает дельту метрик и переносы.
+
 ### API (v1)
 
 Импорт данных → план → факты спринта → риски и метрики:

@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     jobs_timeout_sec: float = 120.0  # arq job_timeout
     jobs_max_tries: int = 2
 
+    # sidecar-оптимизатор (change 018): база + таймаут HTTP-контракта solve
+    optimizer_base_url: str = "http://localhost:8080"
+    optimizer_solve_timeout_sec: float = 60.0
+
     class Config:
         env_prefix = "POSTCODE_"
         env_file = ".env"

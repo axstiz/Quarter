@@ -236,3 +236,26 @@ class TaskRoleHoursORM(Base):
     role: Mapped[str] = mapped_column(String)
     hours: Mapped[float] = mapped_column(Float, default=0.0)
     source: Mapped[str] = mapped_column(String, default="imported")
+
+
+class OptimizationJobORM(Base):
+    __tablename__ = "optimization_jobs"
+    job_id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
+    plan_id: Mapped[str] = mapped_column(String)  # исходная версия плана
+    status: Mapped[str] = mapped_column(String, default="queued")  # queued|solving|ready|failed
+    mode: Mapped[str | None] = mapped_column(String, nullable=True)  # solver|heuristic
+    error: Mapped[str] = mapped_column(String, default="")
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=dict)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now())
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now(), onupdate=func.now())
+
+
+class StaffingMoveORM(Base):
+    __tablename__ = "plan_staffing_moves"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.plan_id"), index=True)
+    engineer_id: Mapped[str] = mapped_column(String)
+    from_team_id: Mapped[str] = mapped_column(String)
+    to_team_id: Mapped[str] = mapped_column(String)

@@ -33,7 +33,27 @@ services:
       POSTCODE_REDIS_URL: redis://redis:6379/0
       POSTCODE_JOBS_MODE: queue
 
-  # change 004+ : связка сервисом — бэк и фронт в контейнерах
+  # change 018: solver-сайдкар Timefold — только в профиле optimizer
+  # (docker compose --profile optimizer up)
+  optimizer:
+    build:
+      context: ./optimizer
+      # VPN-окружение: Maven Central доступен только через host-сеть при сборке
+      network: host
+    profiles: [optimizer]
+    expose:
+      - "8080"
+    environment:
+      OPTIMIZER_PORT: 8080
+      OPTIMIZER_SEED: 42
+      OPTIMIZER_TIME_LIMIT_SECONDS: 30
+      OPTIMIZER_STAFFING_GAIN_THRESHOLD: 0.05
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 3s
+      retries: 20
+
+  # связка сервисом — бэк и фронт в контейнерах
   # (docker compose up — поднимает всё: db + api + frontend)
   api:
     build:
@@ -45,6 +65,7 @@ services:
       - "8000:8000"
     environment:
       POSTCODE_DATABASE_URL: postgresql+asyncpg://postcode:postcode@db:5432/postcode
+      POSTCODE_OPTIMIZER_BASE_URL: http://optimizer:8080
     restart: unless-stopped
 
   frontend:
