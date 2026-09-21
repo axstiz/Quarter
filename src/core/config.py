@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     optimizer_base_url: str = "http://localhost:8080"
     optimizer_solve_timeout_sec: float = 60.0
 
-    # LLM-провайдер (change 026): gigachat (ключи GIGACHAT_CLIENT_*) | ollama | none
+    # LLM-провайдер (change 027): gigachat (ключи GIGACHAT_CLIENT_*) | ollama | none
     llm_provider: Literal["gigachat", "ollama", "none"] = "gigachat"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b-instruct"

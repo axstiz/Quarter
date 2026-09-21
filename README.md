@@ -282,7 +282,7 @@ uv run uvicorn src.main:app --reload  # JOBS_MODE=queue | sync | auto (default: 
 задачу через `uploaded → mapping → questions|ready`, делает повтор (2 попытки),
 по таймауту/ошибке — `failed` с причиной. Повторный прогон: `POST /api/v1/ai/normalize/{job_id}`.
 
-### LLM-провайдеры (change 026)
+### LLM-провайдеры (change 027)
 
 LLM (нормализация колонок при импорте, AI-советник) настраивается через `.env`
 (шаблон — `example.env`):

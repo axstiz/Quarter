@@ -1,4 +1,4 @@
-"""Change 026: выбор LLM-провайдера через настройки (gigachat|ollama|none)."""
+"""Change 027: выбор LLM-провайдера через настройки (gigachat|ollama|none)."""
 import httpx
 import pytest
 
