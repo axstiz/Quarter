@@ -9,11 +9,14 @@ optimizer/.../SolveRequest.java / SolveResponse.java.
 from __future__ import annotations
 
 import logging
+import math
 
 import httpx
 
 from src.core.config import settings
-from src.domain.models import CAPACITY_FACTOR, SPRINTS_PER_QUARTER, Engineer, Task, TeamHistory
+from src.domain.models import CAPACITY_FACTOR, HOURS_PER_SPRINT_FULL, SPRINTS_PER_QUARTER, Engineer, Task, TeamHistory
+
+HOURS_PER_PART = float(HOURS_PER_SPRINT_FULL)  # часть ≤ одного полного лимита спринта
 from src.services.bus_factor import compute_bus_factor
 from src.services.capacity import team_capacity_sp
 from src.services.planner import _rl, engineer_sprint_limit
@@ -32,6 +35,30 @@ def _effective(task: Task, spent: float) -> tuple[float, float]:
         share = remaining / est if est else 1.0
         return round(task.estimation_sp * share, 2), share
     return task.estimation_sp, 1.0
+
+
+def _split_parts(sp_total: float, role_hours: dict[str, float]) -> list[dict]:
+    """Pre-split (change 022): задача режется на k = min(6, ⌈часы÷80⌉) частей.
+
+    SP и роль-часы делятся пропорционально доле части; solver раскладывает части
+    независимо, что даёт растяжение задачи по спринтам в solver-режиме.
+    """
+    total_hh = sum(role_hours.values())
+    if total_hh <= 0:
+        return [{"part": 1, "story_points": sp_total, "role_hours": dict(role_hours)}]
+    k = min(SPRINTS_PER_QUARTER, math.ceil(total_hh / HOURS_PER_PART))
+    parts: list[dict] = []
+    remaining_hh = total_hh
+    for idx in range(1, k + 1):
+        take = remaining_hh if idx == k else min(HOURS_PER_PART, remaining_hh)
+        share = take / total_hh
+        parts.append({
+            "part": idx,
+            "story_points": round(sp_total * share, 2),
+            "role_hours": {role: round(h * share, 2) for role, h in role_hours.items()},
+        })
+        remaining_hh = round(remaining_hh - take, 2)
+    return parts
 
 
 def _sole_holders(engineers: list[Engineer]) -> set[str]:
@@ -63,19 +90,19 @@ def build_snapshot(
             _rl(role): _rl_role_hours(task, role, share)
             for role, hours in (task.role_hours or {}).items()
         }
+        sp_total = eff_sp if eff_sp > 0 else task.estimation_sp
         task_entries.append({
             "task_id": tid,
             "parent_id": task.parent_id or "",  # null запрещён Java-контрактом (400 invalid snapshot)
             "status": task.status,
             "team_id": task.team_id,
-            "story_points": eff_sp if eff_sp > 0 else task.estimation_sp,
+            "story_points": sp_total,
             "estimated_hh": task.estimated_hh or 0.0,
             "spent_time": task.spent_time or 0.0,
             "priority": int(task.priority or 100),
             "planned_in_sprint": bool(getattr(task, "planned_in_sprint", False))
                 or int(task.priority or 100) <= 10,
-            "parts": [{"part": 1, "story_points": eff_sp if eff_sp > 0 else task.estimation_sp,
-                       "role_hours": role_hours}],
+            "parts": _split_parts(sp_total, role_hours),
         })
 
     task_ids = {t["task_id"] for t in task_entries}
