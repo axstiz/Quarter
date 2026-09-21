@@ -39,6 +39,8 @@ services:
       POSTCODE_DATABASE_URL: postgresql+asyncpg://postcode:postcode@db:5432/postcode
       POSTCODE_REDIS_URL: redis://redis:6379/0
       POSTCODE_JOBS_MODE: queue
+      # change 028: воркер исполняет прогон solver'а (run_optimization_job)
+      POSTCODE_OPTIMIZER_BASE_URL: http://optimizer:8080
 
   # change 018: solver-сайдкар Timefold — только в профиле optimizer
   # (docker compose --profile optimizer up)
@@ -77,6 +79,9 @@ services:
     environment:
       POSTCODE_DATABASE_URL: postgresql+asyncpg://postcode:postcode@db:5432/postcode
       POSTCODE_OPTIMIZER_BASE_URL: http://optimizer:8080
+      # очередь тяжёлых операций (change 028): solver/LLM через arq; redis в профиле jobs,
+      # недоступность — деградация в синхронный режим
+      POSTCODE_REDIS_URL: redis://redis:6379/0
     restart: unless-stopped
 
   frontend:

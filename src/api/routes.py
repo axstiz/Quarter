@@ -301,9 +301,9 @@ async def data_upload(file: UploadFile = File(...), ctx: Context = Depends(requi
         except Exception as e:
             logger.warning("enqueue не удался (%s): обработка синхронно", e)
     # деградация: синхронный прогон
-    from src.ai.pipelines.normalization import run_stage, save_job_db as _save
+    from src.ai.pipelines.normalization import run_stage_async, save_job_db as _save
     try:
-        run_stage(job)
+        await run_stage_async(job)
         await _save(ctx.session, job)
     except Exception as e:
         from src.ai.pipelines.normalization import get_job_db
@@ -329,7 +329,7 @@ async def job_status(job_id: str, ctx: Context = Depends(require_context)) -> di
 @router.post("/data/jobs/{job_id}/answers")
 async def job_answers(job_id: str, body: dict, ctx: Context = Depends(require_permission("import_data"))) -> dict:
     """Ответы на вопросы маппинга: {колонка: "entity.field" | "пропустить"}"""
-    from src.ai.pipelines.normalization import get_job_db, run_stage, save_job_db
+    from src.ai.pipelines.normalization import get_job_db, run_stage_async, save_job_db
 
     job = await get_job_db(ctx.session, job_id)
     if not job:
@@ -338,7 +338,7 @@ async def job_answers(job_id: str, body: dict, ctx: Context = Depends(require_pe
         raise HTTPException(status_code=404, detail="job не найден")
     answers = body.get("answers", {})
     try:
-        run_stage(job, answers)
+        await run_stage_async(job, answers)
         await save_job_db(ctx.session, job)
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -371,14 +371,14 @@ async def job_confirm(job_id: str, ctx: Context = Depends(require_permission("im
 @router.post("/ai/normalize/{job_id}")
 async def ai_rerun(job_id: str, ctx: Context = Depends(require_permission("import_data"))) -> dict:
     """Повторный прогон пайплайна (после ответов или без них)."""
-    from src.ai.pipelines.normalization import get_job_db, run_stage, save_job_db
+    from src.ai.pipelines.normalization import get_job_db, run_stage_async, save_job_db
 
     job = await get_job_db(ctx.session, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job не найден")
     if job.workspace_id != ctx.workspace_id:
         raise HTTPException(status_code=404, detail="job не найден")
-    run_stage(job)
+    await run_stage_async(job)
     await save_job_db(ctx.session, job)
     return job.snapshot()
 
@@ -536,6 +536,23 @@ async def optimize_plan_endpoint(body: dict | None = None,
     ctx.session.add(job)
     await ctx.session.commit()
     await ctx.session.refresh(job)
+
+    # change 028: очередь (Redis + JOBS_MODE=auto|queue) — solve вне HTTP-запроса;
+    # права и автор вычислены здесь, воркер только исполняет
+    from src.ai.jobs_worker import get_queue
+
+    queue = await get_queue()
+    if queue is not None:
+        try:
+            await queue.enqueue_job("run_optimization_job", job.job_id,
+                                    author_id=ctx.user.id,
+                                    require_staffing=(ctx.role == "admin"))
+            return {"status": "queued", "job_id": job.job_id, "mode": None,
+                    "plan_id": None, "error": None, "report": None,
+                    "staffing_moves": [], "score": None, "score_breakdown": []}
+        except Exception as e:
+            logger.warning("enqueue optimize не удался (%s): solve синхронно", e)
+
     job.status = "solving"
     await ctx.session.commit()
 
@@ -928,7 +945,8 @@ async def advice_endpoint(plan_id: str, comment: str | None = None,
     optimization_report = optimization_report_endpoint_auto(plan_id, plan, plan_orm, tasks, engineers, history, deps, metrics_report)
     staffing = generate_staffing_suggestions(engineers, tasks)
 
-    from src.ai.pipelines.advisor import AdviceReport, fallback_advice, facts_json, llm_advice
+    from src.ai.pipelines.advisor import (AdviceReport, fallback_advice, facts_json,
+                                          llm_advice_async)
 
     snapshot = facts_json(warnings=warnings, metrics=metrics_report,
                           optimization_report=optimization_report, staffing=staffing,
@@ -941,7 +959,7 @@ async def advice_endpoint(plan_id: str, comment: str | None = None,
     if client.enabled:
         for attempt in (1, 2):
             try:
-                advice = llm_advice(snapshot, client)
+                advice = await llm_advice_async(snapshot, client)
                 advice = [a for a in advice if not (set(a.affected_task_ids) & pinned_ids)]
                 advice = advice[:6]
                 mode = "llm"

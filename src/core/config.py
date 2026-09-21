@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     llm_provider: Literal["gigachat", "ollama", "none"] = "gigachat"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b-instruct"
+    # лимит одновременных LLM-вызовов (change 028): семофор поверх sync-клиента
+    llm_max_concurrency: int = 2
 
     class Config:
         env_prefix = "POSTCODE_"

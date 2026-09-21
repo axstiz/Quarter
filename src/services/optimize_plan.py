@@ -346,6 +346,59 @@ def _sole_holders_set(engineers: list[Engineer]) -> set[str]:
     return {next(iter(ids)) for ids in counts.values() if len(ids) == 1}
 
 
+def repair_dependencies(draft: dict, deps: list[tuple[str, str]]) -> dict:
+    """Repair (change 028): сдвиг частей зависимых задач за конец блокера.
+
+    Timefold в редких завершениях локального поиска отдаёт раскладку, где
+    зависимая часть стартует в спринте блокера — Python-валидация честно
+    ловит. Вместо отказа — детерминированный сдвиг: min(parts blocked) должен
+    стать > max(parts blocker); цепочки оседают итерациями. Части, сдвинутые
+    за спринт 6, уходят «вне квартала» (partial_hh) — как неразмещённые
+    части solver'а в _normalize_draft.
+    """
+    items = draft["items"]
+    if not items or not deps:
+        return draft
+
+    partial = draft.setdefault("partial_hh", {})
+    if partial is None:
+        partial = draft["partial_hh"] = {}
+    dep_of: dict[str, list[str]] = defaultdict(list)  # blocked -> blockers
+    for blocking, blocked in deps:
+        dep_of[blocked].append(blocking)
+
+    for _ in range(6):
+        moved = False
+        task_sprints: dict[str, list[int]] = defaultdict(list)
+        for it in items:
+            task_sprints[it["task_id"]].append(it["sprint_no"])
+        for blocked, blockers in dep_of.items():
+            if blocked not in task_sprints:
+                continue
+            blocker_last = max(
+                (max(task_sprints[b]) for b in blockers if b in task_sprints),
+                default=0)
+            first = min(task_sprints[blocked])
+            if first > blocker_last:
+                continue
+            delta = blocker_last - first + 1
+            for it in [x for x in items if x["task_id"] == blocked]:
+                new_sprint = it["sprint_no"] + delta
+                if new_sprint > SPRINTS_PER_QUARTER:
+                    partial[blocked] = round(
+                        partial.get(blocked, 0.0)
+                        + sum((it.get("role_hours") or {}).values()), 2)
+                    items.remove(it)
+                else:
+                    old = it["sprint_no"]
+                    it["sprint_no"] = new_sprint
+                    it["note"] = f"сдвиг по зависимости: спринт {old} → {new_sprint}"
+            moved = True
+        if not moved:
+            break
+    return draft
+
+
 def validate_draft(draft: dict, tasks: dict[str, Task], engineers: list[Engineer],
                    history: list[TeamHistory], deps: list[tuple[str, str]]) -> list[str]:
     """Hard-правила (спека planning): SP-гейт, роль-гейт, зависимости, единственный носитель."""
@@ -509,6 +562,13 @@ async def run_optimization(session, workspace_id: str, plan_id: str, author_id: 
                                  done_ids=done_ids, first_free_sprint=first_free)
 
     if draft["mode"] == "solver":
+        # repair зависимостей (change 028): Timefold при локальном поиске иногда
+        # завершает с комбинациями частей, где зависимая стартует в спринте
+        # блокера — вместо отказа сдвигаем зависимые части за конец блокера
+        # (семантика сдвига как в replanning); остаток за пределами квартала —
+        # честное «выполнится частично» (частично → allocate_engineers)
+        draft = repair_dependencies(draft, deps)
+        draft = repair_dependencies(draft, deps)
         # макро-гейты на черновик solver ДО распределения: нарушение → 422 (change 018)
         violations = validate_draft(draft, tasks_map, engineers, history, deps)
         if violations:

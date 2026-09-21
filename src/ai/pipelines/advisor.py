@@ -11,6 +11,7 @@ import json
 
 from pydantic import BaseModel, Field
 
+from src.ai.llm import complete_async
 from src.domain.models import SPRINTS_PER_QUARTER
 
 MAX_COMMENT = 500
@@ -101,6 +102,22 @@ def llm_advice(facts: dict, client) -> list[AdviceItem]:
         _USER_PREFIX + json.dumps(facts, ensure_ascii=False),
         temperature=0.0,
     )
+    return _parse_advice(text)
+
+
+async def llm_advice_async(facts: dict, client) -> list[AdviceItem]:
+    """То же через complete_async (change 028): семофор лимита + to_thread —
+    sync-вызов не блокирует event loop и не штурмует провайдера."""
+    text = await complete_async(
+        client,
+        _SYSTEM,
+        _USER_PREFIX + json.dumps(facts, ensure_ascii=False),
+        temperature=0.0,
+    )
+    return _parse_advice(text)
+
+
+def _parse_advice(text: str) -> list[AdviceItem]:
     data = _extract_json(text)
     items = [AdviceItem(**item) for item in data]
     return items

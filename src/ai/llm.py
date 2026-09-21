@@ -6,6 +6,7 @@ fallback-советы (спека onboarding).
 """
 from __future__ import annotations
 
+import asyncio
 import os
 
 import httpx
@@ -82,3 +83,27 @@ def get_client():
                 base_url=os.environ.get("GIGACHAT_BASE_URL"),
             )
     return _CLIENT
+
+
+# --- change 028: конкурентно-безопасные LLM-вызовы --------------------------
+
+_LLM_SEMAPHORE: "asyncio.Semaphore | None" = None
+
+
+def _llm_semaphore() -> "asyncio.Semaphore":
+    """Ленивый семофор лимита LLM-вызовов (размер — settings.llm_max_concurrency)."""
+    global _LLM_SEMAPHORE
+    if _LLM_SEMAPHORE is None:
+        limit = max(1, int(settings.llm_max_concurrency))
+        _LLM_SEMAPHORE = asyncio.Semaphore(limit)
+    return _LLM_SEMAPHORE
+
+
+async def complete_async(client, system: str, user: str, temperature: float = 0.0) -> str:
+    """LLM-вызов вне event loop (sync httpx через to_thread) под лимитом семафора.
+
+    Превышение лимита конкурентности — ожидание в семофоре, без hard-fail;
+    недоступность провайдера — LLMUnavailable (деградация потребителя).
+    """
+    async with _llm_semaphore():
+        return await asyncio.to_thread(client.complete, system, user, temperature)
