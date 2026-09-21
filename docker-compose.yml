@@ -30,6 +30,8 @@ services:
     depends_on:
       - redis
     command: uv run arq src.ai.jobs_worker.WorkerSettings
+    healthcheck:
+      disable: true
     environment:
       POSTCODE_DATABASE_URL: postgresql+asyncpg://postcode:postcode@db:5432/postcode
       POSTCODE_REDIS_URL: redis://redis:6379/0
