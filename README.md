@@ -10,7 +10,7 @@
 
 ```bash
 docker compose up -d --build
-# http://localhost:5173 → /login → демо-роль (reader/editor/admin) → весь сценарий
+# http://localhost:5173 → /login → «Войти как администратор» → весь сценарий
 # Swagger: http://localhost:8000/docs
 ```
 
@@ -33,7 +33,7 @@ curl -sf http://localhost:8000/healthz
 
 # 3) залить демо-датасет (idempotentно, пересоздаёт данные; нужна демо-сессия editor/admin)
 TOKEN=$(curl -s -X POST http://localhost:8000/auth/demo-login -H 'Content-Type: application/json' \
-  -d '{"role": "editor"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+  -d '{"role": "admin"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])'
 curl -X POST http://localhost:8000/api/v1/data/import -H "Authorization: Bearer $TOKEN"
 # или из UI: /login → демо-роль editor/admin → кнопка импорта на /data
 
@@ -231,7 +231,7 @@ uv run uvicorn src.main:app --reload   # Swagger: http://localhost:8000/docs
 ### Аутентификация и workspace (changes 005/008/009)
 
 ```bash
-# демо-вход (reader|editor|admin), возвращает JWT
+# демо-вход одной кнопкой на UI (role=admin), возвращает JWT; роль — параметр API
 curl -X POST localhost:8000/auth/demo-login \
      -H 'content-type: application/json' -d '{"role":"editor"}'
 
@@ -244,7 +244,8 @@ curl -X POST localhost:8000/auth/demo-login \
 ```
 
 Фронтенд: dev-сервер с `VITE_API_MOCKS=false` проксирует и `/api`, и `/auth`; на экране
-входа — три демо-кнопки (reader/editor/admin) или email/пароль. Токен хранится в localStorage,
+входа — одна кнопка «Войти как администратор» (change 024; выбор ролей и email/пароль из UI убраны,
+серверные роли и JWT-ручки сохранены). Токен хранится в localStorage,
 401 возвращает на `/login?expired=1`. Роли серверные: reader — только просмотр, editor —
 план/факты/приоритеты/импорт, admin — подтверждение отмен и права.
 

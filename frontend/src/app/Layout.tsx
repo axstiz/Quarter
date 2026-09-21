@@ -1,30 +1,22 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { BarChart3, Building2, CalendarRange, ClipboardCheck, LogOut, Menu, Moon, ShieldCheck, Sparkles, Sun, Upload, Users } from 'lucide-react'
+import { BarChart3, Building2, CalendarRange, ClipboardCheck, LogOut, Menu, Moon, Sparkles, Sun, Upload } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { USE_MOCKS } from '@/api/client'
 import { useCurrentPlanId, useFacts, usePlanVersions, useSwitchWorkspace, useWorkspaces } from '@/api/queries'
-import { getWorkspaceId, type AuthRole } from '@/api/auth'
+import { clearAuth, getRole, getWorkspaceId } from '@/api/auth'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Field'
-import { clearAuth, getRole } from '@/api/auth'
 import { formatDateTime } from '@/lib/format'
 import { versionLabel } from '@/lib/labels'
 import { t } from '@/lib/motion'
 import { useTheme } from './theme'
-
-const ROLE_LABEL: Record<AuthRole, string> = { reader: 'Наблюдатель', editor: 'Редактор', admin: 'Администратор' }
 
 const NAV = [
   { to: '/plan', label: 'План квартала', icon: CalendarRange },
   { to: '/sprint', label: 'Факт спринта', icon: ClipboardCheck },
   { to: '/team-map', label: 'Звёздная карта', icon: Sparkles },
   { to: '/metrics', label: 'Метрики', icon: BarChart3 },
-]
-
-const ADMIN_NAV = [
-  { to: '/workspace/people', label: 'Участники', icon: Users },
-  { to: '/permissions', label: 'Права и аудит', icon: ShieldCheck },
 ]
 
 const TITLES: Record<string, string> = {
@@ -34,8 +26,6 @@ const TITLES: Record<string, string> = {
   '/metrics': 'Метрики',
   '/import': 'Загрузка данных',
   '/workspaces': 'Рабочие пространства',
-  '/workspace/people': 'Участники',
-  '/permissions': 'Права и аудит',
 }
 
 export function Layout() {
@@ -77,7 +67,6 @@ function Sidebar({ open }: { open: boolean }) {
   const { theme, toggle } = useTheme()
   const plan = params.get('plan')
   const search = plan ? `?plan=${plan}` : ''
-  const role = getRole()
   const workspaces = useWorkspaces()
   const activeWs = workspaces.data?.find((w) => w.id === getWorkspaceId())
 
@@ -88,23 +77,11 @@ function Sidebar({ open }: { open: boolean }) {
         <div>
           <div className="brand__name">Квартал</div>
           <div className="brand__sub">{activeWs ? activeWs.name : 'планирование команд'}</div>
-          {role && <div className="brand__sub">роль: {ROLE_LABEL[role]}</div>}
         </div>
       </div>
       <nav className="nav">
         {NAV.map(({ to, label, icon: Icon }) => (
           <NavLink key={to} to={{ pathname: to, search }} className="nav__item">
-            {({ isActive }) => (
-              <>
-                {isActive && <motion.span layoutId="nav-active" className="nav__active" transition={t.layout} />}
-                <Icon aria-hidden />
-                <span>{label}</span>
-              </>
-            )}
-          </NavLink>
-        ))}
-        {role === 'admin' && ADMIN_NAV.map(({ to, label, icon: Icon }) => (
-          <NavLink key={to} to={to} className="nav__item">
             {({ isActive }) => (
               <>
                 {isActive && <motion.span layoutId="nav-active" className="nav__active" transition={t.layout} />}
@@ -186,8 +163,7 @@ function WorkspaceSwitcher() {
           navigate('/workspaces')
           return
         }
-        const role = list.find((w) => w.id === id)?.role
-        switchWs(id, role)
+        switchWs(id)
         // сброс URL-state контента: планы/задачи другого пространства не показываем
         navigate(location.pathname)
       }}

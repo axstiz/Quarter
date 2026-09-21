@@ -27,20 +27,38 @@ test('auth.ts хранит активный workspace в сессии', () => {
   assert.match(auth, /workspaceId\?: string/)
 })
 
-test('router: онбординг — первый экран, есть маршруты workspace/permissions', () => {
+test('router: онбординг — первый экран', () => {
   const router = read('src/app/router.tsx')
   assert.match(router, /to="\/workspaces" replace/)
   assert.match(router, /path: '\/workspaces'/)
-  assert.match(router, /path: '\/workspace\/people'/)
-  assert.match(router, /path: '\/permissions'/)
   assert.equal(read('src/features/auth/LoginPage.tsx').includes("navigate('/workspaces'"), true)
 })
 
-test('endpoints: ручки workspaces/permissions/advice', () => {
+test('024: admin-экраны участников/прав сняты с UI', () => {
+  assert.equal(existsSync(join(root, 'src/features/workspace/PeoplePage.tsx')), false)
+  assert.equal(existsSync(join(root, 'src/features/workspace/PermissionsPage.tsx')), false)
+  const router = read('src/app/router.tsx')
+  assert.doesNotMatch(router, /workspace\/people/)
+  assert.doesNotMatch(router, /'\/permissions'/)
+  const layout = read('src/app/Layout.tsx')
+  assert.doesNotMatch(layout, /ADMIN_NAV/)
+  assert.doesNotMatch(layout, /роль:/)
+})
+
+test('024: вход — одна кнопка администратора', () => {
+  const login = read('src/features/auth/LoginPage.tsx')
+  assert.match(login, /Войти как администратор/)
+  assert.match(login, /demoLogin\('admin'\)/)
+  assert.doesNotMatch(login, /type="email"|type="password"|<Input/)
+  assert.doesNotMatch(login, /Наблюдатель|Редактор/)
+})
+
+test('endpoints: ручки workspace и советы; участников/прав на фронте нет', () => {
   const endpoints = read('src/api/endpoints.ts')
-  for (const re of [/listWorkspaces/, /createWorkspace/, /listMembers/, /removeMember/, /getPermissionsMatrix/, /updateRolePermission/, /getAuditLog/, /getAdvice/]) {
+  for (const re of [/listWorkspaces/, /createWorkspace/, /getAdvice/]) {
     assert.match(endpoints, re)
   }
+  assert.doesNotMatch(endpoints, /listMembers|removeMember|getPermissionsMatrix|getAuditLog/)
 })
 
 test('моки: workspace-ручки, права, аудит, советы, изоляция', () => {
@@ -54,18 +72,15 @@ test('моки: workspace-ручки, права, аудит, советы, из
     /'\/plans\/:id\/advice'/,
     /wsOf/,
     /Права администратора неотчуждаемы/,
-    /Конфликт закрепления/,
   ]) {
     assert.match(mocks, re)
   }
 })
 
-test('Layout: селектор компании и admin-навигация', () => {
+test('Layout: селектор компании, admin-навигации нет', () => {
   const layout = read('src/app/Layout.tsx')
   assert.match(layout, /WorkspaceSwitcher/)
   assert.match(layout, /Сменить пространство/)
-  assert.match(layout, /workspace\/people/)
-  assert.match(layout, /'\/permissions'/)
 })
 
 test('ImportPage: подпись последствий и баннер пересборки плана', () => {
@@ -89,10 +104,8 @@ test('AdvicePanel: поле комментария одноразовое, ни�
   assert.match(advice, /maxLength=\{500\}/)
 })
 
-test('рабочее пространство доступно для reader только на просмотр', () => {
+test('рабочее пространство: бейджей ролей нет (024)', () => {
   const ws = read('src/features/workspace/WorkspaceSelectPage.tsx')
-  assert.match(ws, /canEdit\(role\)/)
-  assert.match(ws, /role === 'reader'/)
-  const people = read('src/features/workspace/PeoplePage.tsx')
-  assert.match(people, /isAdmin/)
+  assert.doesNotMatch(ws, /ROLE_LABEL|role === 'reader'|Наблюдатель/)
+  assert.match(ws, /Создать рабочее пространство/)
 })
