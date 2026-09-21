@@ -8,3 +8,6 @@ optimizer/dependency-reduced-pom.xml
 
 **.db
 **.db-journal
+
+# Диагностика GigaChat (ключи не коммитим)
+scripts/gigachat_token.py
