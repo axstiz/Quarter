@@ -6,7 +6,7 @@ import { ApiError } from '../api/client'
 import { loadAuth } from '../api/auth'
 import type { EngineerProfile, Plan, PlanTask, TeamOverview, UploadJob } from '../api/types'
 import { DATASET_COLUMN_GUESSES, DATASET_CONFIRM_COUNTS, DATASET_PREVIEW_COUNTS, DATASET_UNMAPPED, DEPENDENCIES, ENGINEERS, TASKS, TEAM_HISTORY } from './data/dataset'
-import { computeBusFactor, computeMetrics, computeWarnings, generatePlan, recomputedPlan, SPRINTS, teamCapacitySp, type EnginePlan, type Item } from './engine'
+import { computeBusFactor, computeMetrics, computeWarnings, engineerSprintLimit, generatePlan, recomputedPlan, SPRINTS, teamCapacitySp, type EnginePlan, type Item } from './engine'
 import type { FactRow, ItemRow, MockJob, PlanRow } from './types'
 
 const plans: PlanRow[] = []
@@ -590,8 +590,7 @@ on('GET', '/bus-factor', (_p, _b, _q, headers) => {
 
 // --- workspaces (change 008, UI 021) ---
 ensureWs('default')
-on('GET', '/workspaces', (_p, _b, _q, headers) => {
-  void headers
+on('GET', '/workspaces', (_p, _b, _q) => {
   const user = mockUser()
   const list = [...workspaces.values()]
     .filter((w) => w.id === 'default' || memberships.get(w.id)?.has(user.id))
@@ -671,6 +670,108 @@ on('GET', '/permissions/audit', (_p, _b, _q, headers) => {
   const ws = wsOf(headers)
   roleInWs(ws, mockUser().id)
   return auditLog.filter((a) => a.ws === ws).map(({ id, actor_id, action, target, details, created_at }) => ({ id, actor_id, action, target, details, created_at }))
+})
+
+// --- прогноз bus factor (change 023): детерминированная раскладка role_hours по носителям ---
+// расхождение с бэком (№10): assignments в моке не хранятся — раскладка пересчитывается
+// из строк плана тем же жадным алгоритмом, что и «Роли по спринтам» (roleModel).
+const FORECAST_METHODOLOGY_MOCK = "Прогноз bus factor по плановой загрузке: часы ролей задач плана (доли частей по SP) раскладываются по носителям ролей детерминированно — лимит 80×ставка на инженера, заём по остатку. Уровни риска: high — единственный носитель роли и объёма (задач ≥ 3 или часов ≥ 80); medium — единственный носитель, либо перегруз спринта при объёме от 80 ч; low — остальная загрузка. «Если уйдёт» — объём плана (N задач / M часов) его assignments."
+
+on('GET', '/plans/:id/bus-forecast', ([id], _b, _q, headers) => {
+  const ws = wsOf(headers)
+  planOrm(id, ws)
+  const tm = taskMapFor(ws)
+  const planned = items.filter((i) => i.plan_id === id && rowWs(i) === ws && i.decision === 'planned')
+
+  // носители ролей: лимиты, команды
+  const limits = new Map<string, number>()
+  const holders: Record<string, string[]> = {}
+  const engRate = new Map<string, number>()
+  const engTeam = new Map<string, string>()
+  for (const e of ENGINEERS) {
+    limits.set(e.engineer_id, engineerSprintLimit(e.capacity_rate))
+    engRate.set(e.engineer_id, e.capacity_rate)
+    if (!engTeam.has(e.engineer_id)) engTeam.set(e.engineer_id, e.team_id)
+    ;(holders[e.role.toLowerCase()] ??= []).push(e.engineer_id)
+  }
+  const used: Record<number, Record<string, number>> = {}
+  for (let n = 1; n <= SPRINTS; n++) used[n] = {}
+  const place = (norm: string, hours: number, sprint: number): [string, number][] => {
+    const out: [string, number][] = []
+    let placed = 0
+    for (const eid of (holders[norm] ?? []).slice().sort()) {
+      if (placed >= hours - 1e-9) break
+      const free = (limits.get(eid) ?? 80) - (used[sprint][eid] ?? 0)
+      if (free <= 1e-9) continue
+      const take = Math.min(hours - placed, free)
+      used[sprint][eid] = (used[sprint][eid] ?? 0) + take
+      placed += take
+      out.push([eid, take])
+    }
+    return out
+  }
+
+  // запросы (task × sprint × role → часы): доли частей по SP, как в roleModel
+  interface Demand { sprint: number; norm: string; display: string; hours: number; task: string }
+  const demands: Demand[] = []
+  for (const row of planned) {
+    const task = tm.get(row.task_id)
+    if (!task || row.sprint_no == null) continue
+    const share = task.estimation_sp > 0 ? (row.planned_sp ?? 0) / task.estimation_sp : 1
+    for (const [role, hours] of Object.entries(task.role_hours ?? {})) {
+      const value = hours * share
+      if (value >= 0.05) demands.push({ sprint: row.sprint_no, norm: role.toLowerCase(), display: role, hours: value, task: task.task_id })
+    }
+  }
+  demands.sort((a, b) => a.sprint - b.sprint || a.norm.localeCompare(b.norm) || a.task.localeCompare(b.task))
+
+  const peopleMap = new Map<string, { perSprint: Record<number, number>; tasks: Set<string>; roles: Set<string> }>()
+  const displayOf: Record<string, string> = {}
+  for (const d of demands) {
+    for (const [eid, take] of place(d.norm, d.hours, d.sprint)) {
+      const entry = peopleMap.get(eid) ?? { perSprint: {}, tasks: new Set<string>(), roles: new Set<string>() }
+      entry.perSprint[d.sprint] = (entry.perSprint[d.sprint] ?? 0) + take
+      entry.tasks.add(d.task)
+      entry.roles.add(d.norm)
+      displayOf[d.norm] = d.display
+      peopleMap.set(eid, entry)
+    }
+  }
+
+  const levelRank: Record<string, number> = { high: 0, medium: 1, low: 2 }
+  const people = [...peopleMap].map(([eid, entry]) => {
+    const limit = limits.get(eid) ?? 80
+    const perSprint: Record<string, number> = {}
+    for (const [n, h] of Object.entries(entry.perSprint)) perSprint[String(n)] = Math.round(h * 10) / 10
+    const total = Math.round(Object.values(entry.perSprint).reduce((a, b) => a + b, 0) * 10) / 10
+    const tasks = entry.tasks.size
+    const overloaded = Object.entries(perSprint).filter(([, h]) => h > limit + 0.05).map(([n]) => n)
+    const critical = [...entry.roles].filter((r) => (holders[r] ?? []).length <= 1)
+      .sort().map((r) => displayOf[r])
+    const level = critical.length && (tasks >= 3 || total >= 80) ? 'high'
+      : critical.length || (overloaded.length && total >= 80) ? 'medium' : 'low'
+    const span = Object.keys(perSprint).map(Number).sort((a, b) => a - b)
+    const basis = [
+      ...(critical.length ? [`единственный носитель: ${critical.join(', ')}`] : []),
+      `загрузка ${tasks} задача(и) / ${total} ч в спринтах ${span[0]}–${span[span.length - 1]}`,
+      ...(overloaded.length ? [`перегруз: ${overloaded.map((n) => `спринт ${n} (${perSprint[n]} ч > ${limit} ч)`).join(', ')}`] : []),
+    ].join('; ')
+    return {
+      engineer_id: eid,
+      team_id: engTeam.get(eid) ?? '',
+      role: ENGINEERS.find((e) => e.engineer_id === eid)?.role ?? '',
+      capacity_rate: engRate.get(eid) ?? 1,
+      limit_hours_per_sprint: limit,
+      hours_per_sprint: perSprint,
+      total_hours: total,
+      tasks_count: tasks,
+      critical_roles: critical,
+      overloaded_sprints: overloaded,
+      risk: { level, affected_tasks: tasks, affected_hours: total, basis },
+    }
+  }).sort((a, b) => levelRank[a.risk.level] - levelRank[b.risk.level] || b.total_hours - a.total_hours || a.engineer_id.localeCompare(b.engineer_id))
+
+  return { plan_id: id, methodology: FORECAST_METHODOLOGY_MOCK, people }
 })
 
 // --- AI-советник (change 015): fallback-советы из warnings/metrics (упрощённый порт) ---

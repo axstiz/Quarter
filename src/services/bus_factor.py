@@ -1,6 +1,20 @@
 from __future__ import annotations
 
-from src.domain.models import BusFactorItem, BusFactorReport, Engineer, Task
+from src.domain.models import BusFactorItem, BusFactorReport, Engineer, Plan, Task
+from src.services.planner import engineer_sprint_limit
+
+FORECAST_METHODOLOGY = (
+    "Прогноз bus factor по плановой загрузке (change 023): берём assignments версии плана "
+    "(task × роль × инженер × спринт × часы, change 016/022). Для каждого инженера с загрузкой: "
+    "часы по спринтам против личного лимита (80 × capacity_rate; 0.5 ставки → 40 ч), суммарный "
+    "объём (задачи, часы за квартал), роли, где он единственный носитель (область «компания», "
+    "как в рисках плана), перегруженные спринты (часы > лимита). Уровни риска: high — единственный "
+    "носитель роли и объём существенен (задач ≥ 3 или часов ≥ 80); medium — единственный носитель "
+    "с любой загрузкой, либо перегрузка ≥ 1 спринта; low — остальная загрузка. «Если уйдёт» — объём "
+    "плана (N задач / M часов), который останется без исполнителя. Ограничение: прогноз опирается "
+    "на плановую загрузку текущей версии и заявленные роли; навыки (skills_declared) и угрозы "
+    "вне плана (болезни, увольнения) не предсказываются."
+)
 
 METHODOLOGY = (
     "Bus Factor = число носителей компетенции (роли или заявленного навыка) в области расчёта "
@@ -128,3 +142,98 @@ def plan_bus_risk(
                 "holders": holders,
             })
     return {"total_at_risk": len(results), "tasks": results}
+
+
+def plan_bus_forecast(plan: "Plan", tasks: dict[str, Task], engineers: list[Engineer]) -> dict:
+    """Прогноз bus factor по плановой загрузке (change 023).
+
+    По assignments версии плана (016/022) собираем на каждого инженера: часы по
+    спринтам vs лимит (80×ставка), суммарный объём (задачи/часы), роли, где он
+    единственный носитель (company-scope), перегруженные спринты и прогноз
+    «если уйдёт — N задач / M часов» с уровнем high/medium/low и численным basis.
+    Люди без плановой загрузки (и виртуальные держатели) в ответ не попадают.
+    """
+    eng_by_id: dict[str, Engineer] = {}
+    for e in engineers:
+        eng_by_id.setdefault(e.engineer_id, e)
+
+    role_holders: dict[str, set[str]] = {}
+    for e in engineers:
+        role_holders.setdefault(e.role.lower(), set()).add(e.engineer_id)
+
+    load: dict[str, dict[int, float]] = {}
+    task_ids: dict[str, set[str]] = {}
+    roles_used: dict[str, set[str]] = {}
+    role_display: dict[str, str] = {}
+    for sprint in plan.sprints:
+        for item in sprint.items:
+            for ass in (item.assignments or []):
+                eid = ass.engineer_id
+                if not eid or eid.startswith("VIRTUAL-"):
+                    continue
+                bucket = load.setdefault(eid, {})
+                bucket[ass.sprint_no] = bucket.get(ass.sprint_no, 0.0) + (ass.hours or 0.0)
+                task_ids.setdefault(eid, set()).add(item.task_id)
+                norm = ass.role.strip().lower()
+                roles_used.setdefault(eid, set()).add(norm)
+                role_display.setdefault(norm, ass.role)
+
+    people: list[dict] = []
+    level_rank = {"high": 0, "medium": 1, "low": 2}
+    for eid in sorted(load):
+        eng = eng_by_id.get(eid)
+        if eng is None:
+            continue
+        limit = engineer_sprint_limit(eng.capacity_rate)
+        per_sprint = {str(n): round(h, 1) for n, h in sorted(load[eid].items())}
+        overloaded = sorted(n for n, h in per_sprint.items() if h > limit + 0.05)
+        critical = sorted(role_display[r] for r in roles_used[eid] if len(role_holders.get(r, set())) <= 1)
+        tasks_n = len(task_ids.get(eid, ()))
+        hours_n = round(sum(load[eid].values()), 1)
+        sprints_span = sorted(int(n) for n in per_sprint)
+
+        if critical and (tasks_n >= 3 or hours_n >= 80):
+            level = "high"
+        elif critical or (overloaded and hours_n >= 80):
+            level = "medium"
+        else:
+            level = "low"
+
+        basis_parts = []
+        if critical:
+            basis_parts.append(f"единственный носитель: {', '.join(critical)}")
+        if sprints_span:
+            basis_parts.append(f"загрузка {tasks_n} задача(и) / {hours_n} ч в спринтах "
+                               f"{sprints_span[0]}–{sprints_span[-1]}")
+        else:
+            basis_parts.append("загрузка 0 ч")
+        if overloaded:
+            over_txt = ", ".join(f"спринт {n} ({per_sprint[n]} ч > {round(limit, 1)} ч)" for n in overloaded)
+            basis_parts.append(f"перегруз: {over_txt}")
+        basis = "; ".join(basis_parts)
+
+        people.append({
+            "engineer_id": eid,
+            "team_id": eng.team_id,
+            "role": eng.role,
+            "capacity_rate": eng.capacity_rate,
+            "limit_hours_per_sprint": round(limit, 1),
+            "hours_per_sprint": per_sprint,
+            "total_hours": hours_n,
+            "tasks_count": tasks_n,
+            "critical_roles": critical,
+            "overloaded_sprints": overloaded,
+            "risk": {
+                "level": level,
+                "affected_tasks": tasks_n,
+                "affected_hours": hours_n,
+                "basis": basis,
+            },
+        })
+
+    people.sort(key=lambda p: (level_rank[p["risk"]["level"]], -p["total_hours"], p["engineer_id"]))
+    return {
+        "plan_id": plan.plan_id,
+        "methodology": FORECAST_METHODOLOGY,
+        "people": people,
+    }

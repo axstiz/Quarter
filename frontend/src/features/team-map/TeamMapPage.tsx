@@ -1,11 +1,12 @@
 import { useMemo } from 'react'
-import { useBusFactor, useCurrentPlanId, useEngineers, usePlan, useStarMap, useTasks } from '@/api/queries'
+import { useBusFactor, useBusForecast, useCurrentPlanId, useEngineers, usePlan, useStarMap, useTasks } from '@/api/queries'
 import { buildPlanModel } from '@/lib/planModel'
 import { Panel } from '@/components/ui/Panel'
 import { ErrorAlert, SkeletonRows } from '@/components/ui/States'
 import { Tabs } from '@/components/ui/Tabs'
 import { useParam } from '@/lib/useParam'
 import { CompetenciesTab } from './CompetenciesTab'
+import { ForecastTab } from './ForecastTab'
 import { PeopleTab } from './PeopleTab'
 import { PersonPanelContent } from './PersonPanel'
 import { TeamsTab } from './TeamsTab'
@@ -41,6 +42,7 @@ export function TeamMapPage() {
   const people = new Set(summary.data?.teams.flatMap((x) => x.engineers.map((e) => e.engineer_id)))
   // Критичные по онбордингу: Bus Factor 1 у компетенции, которая нужна задачам плана
   const risky = bus.data?.items.filter((i) => i.scope_type === 'company' && i.factor <= 1 && (roleDemand.get(`company|${i.key}`)?.length ?? 0) > 0).length
+  const forecast = useBusForecast(plan.data?.plan_id ?? null)
   const overlay = current === 'map'
 
   return (
@@ -60,6 +62,7 @@ export function TeamMapPage() {
             { value: 'people', label: 'Люди', count: summary.data ? people.size : undefined },
             { value: 'teams', label: 'Команды и роли', count: summary.data?.teams.length },
             { value: 'competencies', label: 'Компетенции и Bus Factor', count: risky },
+            { value: 'forecast', label: 'Прогноз рисков', count: forecast.data ? forecast.data.people.filter((p) => p.risk.level !== 'low').length : undefined },
           ]}
         />
 
@@ -79,6 +82,8 @@ export function TeamMapPage() {
           <PeopleTab summary={summary.data} busFactor={bus.data} selected={person} onSelect={setPerson} />
         ) : current === 'teams' ? (
           <TeamsTab summary={summary.data} onSelect={setPerson} />
+        ) : current === 'forecast' ? (
+          <ForecastTab planId={plan.data?.plan_id ?? null} onSelect={setPerson} />
         ) : bus.error ? (
           <ErrorAlert error={bus.error} onRetry={() => bus.refetch()} />
         ) : !bus.data ? (

@@ -145,6 +145,38 @@ export interface AuditEntry {
 
 export type AdviceKind = 'task_move' | 'staffing_shift' | 'initiative_rescue' | 'sprint_priority'
 
+// --- Прогноз bus factor по плановой загрузке (change 023) ---
+
+export type ForecastRiskLevel = 'high' | 'medium' | 'low'
+
+export interface BusForecastEntry {
+  engineer_id: string
+  team_id: string
+  role: string
+  capacity_rate: number
+  limit_hours_per_sprint: number
+  /** спринт (1..6) → плановые часы из assignments */
+  hours_per_sprint: Record<string, number>
+  total_hours: number
+  tasks_count: number
+  /** роли, где инженер — единственный носитель */
+  critical_roles: string[]
+  /** спринты с перегрузом (часы > лимита) */
+  overloaded_sprints: string[]
+  risk: {
+    level: ForecastRiskLevel
+    affected_tasks: number
+    affected_hours: number
+    basis: string
+  }
+}
+
+export interface BusForecast {
+  plan_id: string
+  methodology: string
+  people: BusForecastEntry[]
+}
+
 export interface AdviceItem {
   kind: AdviceKind
   affected_task_ids: string[]

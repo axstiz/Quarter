@@ -2,6 +2,7 @@ import { request, requestRoot, query } from './client'
 import type {
   AdviceReport,
   BusFactorReport,
+  BusForecast,
   PlanBusRisk,
   ConfirmResponse,
   Dependency,
@@ -80,6 +81,8 @@ export const api = {
   getStarMap: () => request<StarMapSummary>('GET', '/star-map/summary'),
   getBusFactor: () => request<BusFactorReport>('GET', '/bus-factor'),
   getPlanBusRisk: (planId: string) => request<PlanBusRisk>('GET', `/plans/${planId}/bus-risk`),
+  /** Прогноз bus factor по плановой загрузке (change 023): assignments версии плана. */
+  getBusForecast: (planId: string) => request<BusForecast>('GET', `/plans/${planId}/bus-forecast`),
 
   // Стр. 4 — метрики
   getMetrics: (planId: string) => request<Metrics>('GET', `/plans/${planId}/metrics`),
