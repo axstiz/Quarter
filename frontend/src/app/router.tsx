@@ -11,6 +11,7 @@ const MetricsPage = lazy(() => import('@/features/metrics/MetricsPage').then((m)
 const ImportPage = lazy(() => import('@/features/import/ImportPage').then((m) => ({ default: m.ImportPage })))
 const LoginPage = lazy(() => import('@/features/auth/LoginPage').then((m) => ({ default: m.LoginPage })))
 const WorkspaceSelectPage = lazy(() => import('@/features/workspace/WorkspaceSelectPage').then((m) => ({ default: m.WorkspaceSelectPage })))
+const DataPage = lazy(() => import('@/features/data/DataPage').then((m) => ({ default: m.DataPage })))
 
 const page = (el: ReactNode) => (
   <Suspense
@@ -38,6 +39,7 @@ export const router = createBrowserRouter([
       { path: '/team-map', element: page(<TeamMapPage />) },
       { path: '/metrics', element: page(<MetricsPage />) },
       { path: '/import', element: page(<ImportPage />) },
+      { path: '/data', element: page(<DataPage />) },
       { path: '*', element: <Navigate to="/workspaces" replace /> },
     ],
   },

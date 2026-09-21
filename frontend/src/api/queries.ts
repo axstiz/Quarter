@@ -106,6 +106,11 @@ export function useEngineers(filters: EngineerFilters) {
   })
 }
 
+/** Список команд с участниками — для редактора данных (Команды). */
+export function useTeams() {
+  return useQuery({ queryKey: keys.teams, queryFn: api.listTeams })
+}
+
 export function useEngineer(id: string | null) {
   return useQuery({ queryKey: keys.engineer(id ?? ''), queryFn: () => api.getEngineer(id!), enabled: !!id })
 }
