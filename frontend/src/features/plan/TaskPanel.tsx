@@ -1,4 +1,5 @@
 import { ArrowRight, Ban, Info, ShieldAlert } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { useCancelTask, useDependencies } from '@/api/queries'
@@ -65,6 +66,11 @@ export function TaskPanelContent({ model, planId, taskId, tasksInfo, busFactor, 
 
   return (
     <>
+      <div style={{ textAlign: 'right' }}>
+        <Link to={`/data?tab=tasks&row=${taskId}`} className="muted" style={{ fontSize: 'var(--text-xs)', textDecoration: 'none' }}>
+          ✎ Редактировать данные
+        </Link>
+      </div>
       <dl className="fields">
         <dt>Решение</dt>
         <dd>{decision ? <DecisionBadge decision={decision} /> : <span className="muted">Выполнена до квартала</span>}</dd>

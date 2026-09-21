@@ -34,6 +34,12 @@ export function PersonPanelContent({ id }: { id: string }) {
         </dd>
       </dl>
 
+      <div style={{ textAlign: 'right' }}>
+        <Link to={`/data?tab=people&row=${id}`} className="muted" style={{ fontSize: 'var(--text-xs)', textDecoration: 'none' }}>
+          ✎ Редактировать данные
+        </Link>
+      </div>
+
       <section>
         <h3 style={{ marginBottom: 'var(--s-2)' }}>Команды</h3>
         <table className="table table--compact">

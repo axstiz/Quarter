@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { BarChart3, Building2, CalendarRange, ClipboardCheck, LogOut, Menu, Moon, Sparkles, Sun, Upload } from 'lucide-react'
+import { BarChart3, Building2, CalendarRange, ClipboardCheck, LogOut, Menu, Moon, Sparkles, Sun, Table2, Upload } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { USE_MOCKS } from '@/api/client'
@@ -17,6 +17,7 @@ const NAV = [
   { to: '/sprint', label: 'Факт спринта', icon: ClipboardCheck },
   { to: '/team-map', label: 'Звёздная карта', icon: Sparkles },
   { to: '/metrics', label: 'Метрики', icon: BarChart3 },
+  { to: '/data', label: 'Данные', icon: Table2 },
 ]
 
 const TITLES: Record<string, string> = {
@@ -25,6 +26,7 @@ const TITLES: Record<string, string> = {
   '/team-map': 'Звёздная карта',
   '/metrics': 'Метрики',
   '/import': 'Загрузка данных',
+  '/data': 'Данные',
   '/workspaces': 'Рабочие пространства',
 }
 

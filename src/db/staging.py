@@ -217,8 +217,8 @@ async def stage_import(session: AsyncSession, job, workspace_id: str = "default"
         if existing:
             if existing.source == "manual":
                 continue
-            existing.velocity_achieved = _f(row.get("velocity_achieved"))
-            existing.planned_sp = _f(row.get("planned_sp"))
+            existing.velocity_achieved = _f(row.get("velocity_achieved"), existing.velocity_achieved)
+            existing.planned_sp = _f(row.get("planned_sp"), existing.planned_sp)
             existing.source = "imported"
         else:
             session.add(TeamHistoryORM(
@@ -254,7 +254,7 @@ async def stage_import(session: AsyncSession, job, workspace_id: str = "default"
         elif rr.get("role") is None and rr.get("task_id"):
             hours = _f(str(rr.get("hours") or ""))
             key = (str(rr["task_id"]), str(rr.get("role") or ""))
-            if hours <= 0 or str(rr["task_id"]) not in valid_task_ids or key in seen_role_req:
+            if hours <= 0 or not key[1] or str(rr["task_id"]) not in valid_task_ids or key in seen_role_req:
                 continue
             seen_role_req.add(key)
             n_req += await _upsert_role_req(session, workspace_id, str(rr["task_id"]), str(rr.get("role") or ""), hours)

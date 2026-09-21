@@ -2,6 +2,7 @@ import { request, requestRoot, query } from './client'
 import type {
   AdviceReport,
   BusFactorReport,
+  BusForecast,
   PlanBusRisk,
   ConfirmResponse,
   Dependency,
@@ -60,6 +61,31 @@ export const api = {
   listTasks: () => request<TaskInfo[]>('GET', '/tasks'),
   listDependencies: () => request<Dependency[]>('GET', '/dependencies'),
 
+  // Редактор данных (change 019): CRUD поверх существующих записей
+  createTask: (t: { task_id: string; team_id?: string; summary?: string; status?: string; estimation_sp?: number; estimated_hh?: number }) =>
+    request<{ status: string }>('POST', '/tasks', t),
+  updateTask: (taskId: string, patch: Partial<{ team_id: string; summary: string; status: string; estimation_sp: number; estimated_hh: number }>) =>
+    request<{ status: string }>('PUT', `/tasks/${taskId}`, patch),
+  deleteTask: (taskId: string) => request<{ status: string }>('DELETE', `/tasks/${taskId}`),
+  /** Замена набора роль → часы (нулевые отбрасываются бэком); правка делает записи ручными. */
+  setTaskRoleHours: (taskId: string, roleHours: Record<string, number>) =>
+    request<{ status: string; role_hours: Record<string, number> }>('PUT', `/tasks/${taskId}/role-hours`, { role_hours: roleHours }),
+  createEngineer: (e: { engineer_id: string; team_id: string; role: string; grade?: string; skills_declared?: string; capacity_rate?: number }) =>
+    request<{ status: string }>('POST', '/engineers', e),
+  updateEngineer: (engineerId: string, patch: Partial<{ team_id: string; role: string; grade: string; skills_declared: string; capacity_rate: number }>) =>
+    request<{ status: string }>('PUT', `/engineers/${engineerId}`, patch),
+  deleteEngineer: (engineerId: string) => request<{ status: string }>('DELETE', `/engineers/${engineerId}`),
+  createTeam: (existingTeamId: string, name?: string) =>
+    request<{ status: string }>('POST', '/teams', { team_id: existingTeamId, name }),
+  updateTeam: (teamId: string, name: string) => request<{ status: string }>('PUT', `/teams/${teamId}`, { name }),
+  deleteTeam: (teamId: string) => request<{ status: string }>('DELETE', `/teams/${teamId}`),
+  createDependency: (d: { blocking_task_id: string; blocked_task_id: string; dependency_type?: string }) =>
+    request<{ status: string }>('POST', '/dependencies', d),
+  updateDependency: (blockingTaskId: string, blockedTaskId: string, dependencyType: string) =>
+    request<{ status: string }>('PUT', `/dependencies?blocking_task_id=${encodeURIComponent(blockingTaskId)}&blocked_task_id=${encodeURIComponent(blockedTaskId)}`, { dependency_type: dependencyType }),
+  deleteDependency: (blockingTaskId: string, blockedTaskId: string) =>
+    request<{ status: string }>('DELETE', `/dependencies?blocking_task_id=${encodeURIComponent(blockingTaskId)}&blocked_task_id=${encodeURIComponent(blockedTaskId)}`),
+
   // Стр. 2 — факт и пересчёт
   submitFact: (planId: string, sprintNo: number, body: SprintFactInput) =>
     request<FactResponse>('POST', `/plans/${planId}/sprints/${sprintNo}/facts`, body),
@@ -80,6 +106,8 @@ export const api = {
   getStarMap: () => request<StarMapSummary>('GET', '/star-map/summary'),
   getBusFactor: () => request<BusFactorReport>('GET', '/bus-factor'),
   getPlanBusRisk: (planId: string) => request<PlanBusRisk>('GET', `/plans/${planId}/bus-risk`),
+  /** Прогноз bus factor по плановой загрузке (change 023): assignments версии плана. */
+  getBusForecast: (planId: string) => request<BusForecast>('GET', `/plans/${planId}/bus-forecast`),
 
   // Стр. 4 — метрики
   getMetrics: (planId: string) => request<Metrics>('GET', `/plans/${planId}/metrics`),

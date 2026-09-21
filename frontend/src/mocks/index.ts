@@ -6,7 +6,7 @@ import { ApiError } from '../api/client'
 import { loadAuth } from '../api/auth'
 import type { EngineerProfile, Plan, PlanTask, TeamOverview, UploadJob } from '../api/types'
 import { DATASET_COLUMN_GUESSES, DATASET_CONFIRM_COUNTS, DATASET_PREVIEW_COUNTS, DATASET_UNMAPPED, DEPENDENCIES, ENGINEERS, TASKS, TEAM_HISTORY } from './data/dataset'
-import { computeBusFactor, computeMetrics, computeWarnings, generatePlan, recomputedPlan, SPRINTS, teamCapacitySp, type EnginePlan, type Item } from './engine'
+import { computeBusFactor, computeMetrics, computeWarnings, engineerSprintLimit, generatePlan, recomputedPlan, SPRINTS, teamCapacitySp, type EnginePlan, type Item } from './engine'
 import type { FactRow, ItemRow, MockJob, PlanRow } from './types'
 
 const plans: PlanRow[] = []
@@ -124,6 +124,7 @@ function loadState() {
       items: ItemRow[]
       facts: FactRow[]
       priorities: Record<string, number>
+      editorMutations?: Record<string, Record<string, unknown>>
       workspaces?: WsRow[]
       memberships?: [string, [string, string][]][]
       wsState?: [string, WsState][]
@@ -134,6 +135,10 @@ function loadState() {
     items = saved.items
     facts.push(...saved.facts)
     for (const t of TASKS) if (saved.priorities[t.task_id] !== undefined) t.priority = saved.priorities[t.task_id]
+    for (const [tid, patch] of Object.entries(saved.editorMutations ?? {})) {
+      const t = TASKS.find((x) => x.task_id === tid) as unknown as Record<string, unknown> | undefined
+      if (t) for (const [k, v] of Object.entries(patch)) t[k] = v
+    }
     for (const w of saved.workspaces ?? []) workspaces.set(w.id, w)
     ensureWs('default')
     for (const [ws, list] of saved.memberships ?? []) memberships.set(ws, new Map(list))
@@ -160,6 +165,7 @@ function saveState() {
         wsState: [...wsState],
         roleOverrides,
         auditLog: auditLog.slice(0, 200),
+        editorMutations,
       }),
     )
   } catch {
@@ -336,6 +342,138 @@ on('GET', '/tasks', (_p, _b, _q, headers) => {
   const ws = wsOf(headers)
   if (!wsReady(ws)) return []
   return tasksFor(ws).sort((a, b) => (a.task_id < b.task_id ? -1 : 1)).map(({ priority: _p, ...t }) => ({ ...t }))
+})
+
+// --- редактор данных (change 019): CRUD поверх записей ---
+// правки мутируют шаблон TASKS/DEPENDENCIES в памяти (м persist — ?mock-reset; персист патчей —
+// ограничение мока, see frontend/README «Расхождения» №11)
+const editorMutations: Record<string, unknown> = {}
+/** Имена команд (для duplicate-check мока); дефолт берётся из ENGINEERS при старте. */
+const TEAM_NAMES = new Set<string>()
+
+function applyTaskEdit(tid: string, patch: Record<string, unknown>) {
+  const t = TASKS.find((x) => x.task_id === tid) as unknown as Record<string, unknown> | undefined
+  if (!t) throw new ApiError(404, 'задача не найдена')
+  for (const [k, v] of Object.entries(patch)) t[k] = v
+  editorMutations[tid] = { ...((editorMutations[tid] as Record<string, unknown>) ?? {}), ...patch }
+}
+
+const findTaskOr404 = (tid: string) => {
+  const t = TASKS.find((x) => x.task_id === tid)
+  if (!t) throw new ApiError(404, 'задача не найдена')
+  return t
+}
+
+on('POST', '/tasks', (_p, body) => {
+  const b = (body ?? {}) as { task_id?: string; team_id?: string; summary?: string; status?: string; estimation_sp?: number; estimated_hh?: number }
+  if (!b.task_id?.trim()) throw new ApiError(422, 'task_id обязателен')
+  if (TASKS.some((x) => x.task_id === b.task_id)) throw new ApiError(409, 'задача уже существует')
+  const t = { ...b, parent_id: null, spent_time: 0, planned_in_sprint: false, role_hours: {} as Record<string, number>, priority: 100, status: b.status ?? 'ToDo' }
+  TASKS.push(t as unknown as (typeof TASKS)[number])
+  return { __status: 201, status: 'created', task_id: b.task_id }
+})
+on('PUT', '/tasks/:id/role-hours', ([id], body) => {
+  findTaskOr404(id)
+  const rh = ((body ?? {}) as { role_hours?: Record<string, number> }).role_hours ?? {}
+  const next: Record<string, number> = {}
+  for (const [role, hours] of Object.entries(rh)) {
+    const v = Number(hours)
+    if (Number.isFinite(v) && v > 0) next[role] = v
+  }
+  applyTaskEdit(id, { role_hours: next, source: 'manual' })
+  return { status: 'updated', task_id: id, role_hours: next }
+})
+on('PUT', '/tasks/:id', ([id], body) => {
+  const t = findTaskOr404(id) as unknown as Record<string, unknown>
+  const b = (body ?? {}) as Record<string, unknown>
+  if (b.task_id && b.task_id !== id) throw new ApiError(409, 'task_id менять нельзя — создайте новую задачу')
+  for (const field of ['team_id', 'summary', 'status', 'estimation_sp', 'estimated_hh']) {
+    if (b[field] !== undefined && b[field] !== null) t[field] = b[field]
+  }
+  t.source = 'manual'
+  editorMutations[id] = { ...((editorMutations[id] as Record<string, unknown>) ?? {}) }
+  return { status: 'updated', task_id: id }
+})
+on('DELETE', '/tasks/:id', ([id]) => {
+  const idx = TASKS.findIndex((x) => x.task_id === id)
+  if (idx < 0) throw new ApiError(404, 'задача не найдена')
+  TASKS.splice(idx, 1)
+  delete editorMutations[id]
+  return { status: 'deleted', task_id: id }
+})
+on('POST', '/engineers', (_p, body) => {
+  const b = (body ?? {}) as { engineer_id?: string; team_id?: string; role?: string; grade?: string; skills_declared?: string; capacity_rate?: number }
+  if (!b.engineer_id?.trim()) throw new ApiError(422, 'engineer_id обязателен')
+  if (ENGINEERS.some((x) => x.engineer_id === b.engineer_id)) throw new ApiError(409, 'инженер уже существует')
+  ENGINEERS.push({
+    engineer_id: b.engineer_id, team_id: b.team_id ?? '', role: b.role ?? '',
+    grade: b.grade ?? '', skills_declared: b.skills_declared ?? '', capacity_rate: b.capacity_rate ?? 1,
+  })
+  return { __status: 201, status: 'created', engineer_id: b.engineer_id, source: 'manual' }
+})
+on('PUT', '/engineers/:id', ([id], body) => {
+  const eng = ENGINEERS.find((x) => x.engineer_id === id) as unknown as Record<string, unknown>
+  if (!eng) throw new ApiError(404, 'не найден')
+  const b = (body ?? {}) as Record<string, unknown>
+  if (b.engineer_id && b.engineer_id !== id) throw new ApiError(409, 'engineer_id менять нельзя')
+  for (const field of ['team_id', 'role', 'grade', 'skills_declared', 'capacity_rate']) {
+    if (b[field] !== undefined && b[field] !== null) eng[field] = b[field]
+  }
+  return { status: 'updated', engineer_id: id }
+})
+on('DELETE', '/engineers/:id', ([id]) => {
+  const idx = ENGINEERS.findIndex((x) => x.engineer_id === id)
+  if (idx < 0) throw new ApiError(404, 'не найден')
+  ENGINEERS.splice(idx, 1)
+  return { status: 'deleted', engineer_id: id }
+})
+on('POST', '/teams', (_p, body) => {
+  const b = (body ?? {}) as { team_id?: string; name?: string }
+  if (!b.team_id?.trim()) throw new ApiError(422, 'team_id обязателен')
+  if (TEAM_NAMES.has(b.team_id!) || ENGINEERS.some((e) => e.team_id === b.team_id)) {
+    throw new ApiError(409, 'команда уже существует')
+  }
+  TEAM_NAMES.add(b.team_id!)
+  return { __status: 201, status: 'created', team_id: b.team_id }
+})
+on('PUT', '/teams/:id', ([id], body) => {
+  void body
+  const b = (body ?? {}) as { name?: string }
+  if (!(b.name ?? '').trim()) throw new ApiError(422, 'name обязателен для переименования')
+  return { status: 'updated', team_id: id, name: b.name }
+})
+on('DELETE', '/teams/:id', ([id]) => {
+  if (ENGINEERS.some((e) => e.team_id === id)) throw new ApiError(409, 'у команды есть инженеры — сначала перенесите их')
+  return { status: 'deleted', team_id: id }
+})
+on('POST', '/dependencies', (_p, body) => {
+  const b = (body ?? {}) as { blocking_task_id?: string; blocked_task_id?: string; dependency_type?: string }
+  if (!b.blocking_task_id || !b.blocked_task_id) throw new ApiError(422, 'blocking_task_id и blocked_task_id обязательны')
+  if (!b.blocked_task_id || !b.blocking_task_id) throw new ApiError(422, 'пара задач обязательна')
+  if (b.blocking_task_id === b.blocked_task_id) throw new ApiError(422, 'задача не может блокировать сама себя')
+  const d = { blocking_task_id: b.blocking_task_id, blocked_task_id: b.blocked_task_id, dependency_type: b.dependency_type ?? 'depends on' }
+  if (b.blocking_task_id === b.blocked_task_id) throw new ApiError(422, 'self-dependency')
+  if (DEPENDENCIES.some((x) => x.blocking_task_id === d.blocking_task_id && x.blocked_task_id === d.blocked_task_id)) throw new ApiError(409, 'зависимость уже существует')
+  DEPENDENCIES.push(d)
+  return { __status: 201, status: 'created' }
+})
+on('PUT', '/dependencies', (_p, body, q) => {
+  const a = q.get('blocking_task_id') ?? ''
+  const b = q.get('blocked_task_id') ?? ''
+  const dep = DEPENDENCIES.find((x) => x.blocking_task_id === a && x.blocked_task_id === b)
+  if (!dep) throw new ApiError(404, 'зависимость не найдена')
+  const type = ((body ?? {}) as { dependency_type?: string }).dependency_type
+  if (!type) throw new ApiError(422, 'dependency_type обязателен')
+  dep.dependency_type = type
+  return { status: 'updated', blocking_task_id: a, blocked_task_id: b, dependency_type: type }
+})
+on('DELETE', '/dependencies', (_p, _b, q) => {
+  const a = q.get('blocking_task_id') ?? ''
+  const b = q.get('blocked_task_id') ?? ''
+  const idx = DEPENDENCIES.findIndex((x) => x.blocking_task_id === a && x.blocked_task_id === b)
+  if (idx < 0) throw new ApiError(404, 'зависимость не найдена')
+  DEPENDENCIES.splice(idx, 1)
+  return { status: 'deleted', blocking_task_id: a, blocked_task_id: b }
 })
 on('GET', '/dependencies', (_p, _b, _q, headers) => {
   if (!wsReady(wsOf(headers))) return []
@@ -590,8 +728,7 @@ on('GET', '/bus-factor', (_p, _b, _q, headers) => {
 
 // --- workspaces (change 008, UI 021) ---
 ensureWs('default')
-on('GET', '/workspaces', (_p, _b, _q, headers) => {
-  void headers
+on('GET', '/workspaces', (_p, _b, _q) => {
   const user = mockUser()
   const list = [...workspaces.values()]
     .filter((w) => w.id === 'default' || memberships.get(w.id)?.has(user.id))
@@ -671,6 +808,108 @@ on('GET', '/permissions/audit', (_p, _b, _q, headers) => {
   const ws = wsOf(headers)
   roleInWs(ws, mockUser().id)
   return auditLog.filter((a) => a.ws === ws).map(({ id, actor_id, action, target, details, created_at }) => ({ id, actor_id, action, target, details, created_at }))
+})
+
+// --- прогноз bus factor (change 023): детерминированная раскладка role_hours по носителям ---
+// расхождение с бэком (№10): assignments в моке не хранятся — раскладка пересчитывается
+// из строк плана тем же жадным алгоритмом, что и «Роли по спринтам» (roleModel).
+const FORECAST_METHODOLOGY_MOCK = "Прогноз bus factor по плановой загрузке: часы ролей задач плана (доли частей по SP) раскладываются по носителям ролей детерминированно — лимит 80×ставка на инженера, заём по остатку. Уровни риска: high — единственный носитель роли и объёма (задач ≥ 3 или часов ≥ 80); medium — единственный носитель, либо перегруз спринта при объёме от 80 ч; low — остальная загрузка. «Если уйдёт» — объём плана (N задач / M часов) его assignments."
+
+on('GET', '/plans/:id/bus-forecast', ([id], _b, _q, headers) => {
+  const ws = wsOf(headers)
+  planOrm(id, ws)
+  const tm = taskMapFor(ws)
+  const planned = items.filter((i) => i.plan_id === id && rowWs(i) === ws && i.decision === 'planned')
+
+  // носители ролей: лимиты, команды
+  const limits = new Map<string, number>()
+  const holders: Record<string, string[]> = {}
+  const engRate = new Map<string, number>()
+  const engTeam = new Map<string, string>()
+  for (const e of ENGINEERS) {
+    limits.set(e.engineer_id, engineerSprintLimit(e.capacity_rate))
+    engRate.set(e.engineer_id, e.capacity_rate)
+    if (!engTeam.has(e.engineer_id)) engTeam.set(e.engineer_id, e.team_id)
+    ;(holders[e.role.toLowerCase()] ??= []).push(e.engineer_id)
+  }
+  const used: Record<number, Record<string, number>> = {}
+  for (let n = 1; n <= SPRINTS; n++) used[n] = {}
+  const place = (norm: string, hours: number, sprint: number): [string, number][] => {
+    const out: [string, number][] = []
+    let placed = 0
+    for (const eid of (holders[norm] ?? []).slice().sort()) {
+      if (placed >= hours - 1e-9) break
+      const free = (limits.get(eid) ?? 80) - (used[sprint][eid] ?? 0)
+      if (free <= 1e-9) continue
+      const take = Math.min(hours - placed, free)
+      used[sprint][eid] = (used[sprint][eid] ?? 0) + take
+      placed += take
+      out.push([eid, take])
+    }
+    return out
+  }
+
+  // запросы (task × sprint × role → часы): доли частей по SP, как в roleModel
+  interface Demand { sprint: number; norm: string; display: string; hours: number; task: string }
+  const demands: Demand[] = []
+  for (const row of planned) {
+    const task = tm.get(row.task_id)
+    if (!task || row.sprint_no == null) continue
+    const share = task.estimation_sp > 0 ? (row.planned_sp ?? 0) / task.estimation_sp : 1
+    for (const [role, hours] of Object.entries(task.role_hours ?? {})) {
+      const value = hours * share
+      if (value >= 0.05) demands.push({ sprint: row.sprint_no, norm: role.toLowerCase(), display: role, hours: value, task: task.task_id })
+    }
+  }
+  demands.sort((a, b) => a.sprint - b.sprint || a.norm.localeCompare(b.norm) || a.task.localeCompare(b.task))
+
+  const peopleMap = new Map<string, { perSprint: Record<number, number>; tasks: Set<string>; roles: Set<string> }>()
+  const displayOf: Record<string, string> = {}
+  for (const d of demands) {
+    for (const [eid, take] of place(d.norm, d.hours, d.sprint)) {
+      const entry = peopleMap.get(eid) ?? { perSprint: {}, tasks: new Set<string>(), roles: new Set<string>() }
+      entry.perSprint[d.sprint] = (entry.perSprint[d.sprint] ?? 0) + take
+      entry.tasks.add(d.task)
+      entry.roles.add(d.norm)
+      displayOf[d.norm] = d.display
+      peopleMap.set(eid, entry)
+    }
+  }
+
+  const levelRank: Record<string, number> = { high: 0, medium: 1, low: 2 }
+  const people = [...peopleMap].map(([eid, entry]) => {
+    const limit = limits.get(eid) ?? 80
+    const perSprint: Record<string, number> = {}
+    for (const [n, h] of Object.entries(entry.perSprint)) perSprint[String(n)] = Math.round(h * 10) / 10
+    const total = Math.round(Object.values(entry.perSprint).reduce((a, b) => a + b, 0) * 10) / 10
+    const tasks = entry.tasks.size
+    const overloaded = Object.entries(perSprint).filter(([, h]) => h > limit + 0.05).map(([n]) => n)
+    const critical = [...entry.roles].filter((r) => (holders[r] ?? []).length <= 1)
+      .sort().map((r) => displayOf[r])
+    const level = critical.length && (tasks >= 3 || total >= 80) ? 'high'
+      : critical.length || (overloaded.length && total >= 80) ? 'medium' : 'low'
+    const span = Object.keys(perSprint).map(Number).sort((a, b) => a - b)
+    const basis = [
+      ...(critical.length ? [`единственный носитель: ${critical.join(', ')}`] : []),
+      `загрузка ${tasks} задача(и) / ${total} ч в спринтах ${span[0]}–${span[span.length - 1]}`,
+      ...(overloaded.length ? [`перегруз: ${overloaded.map((n) => `спринт ${n} (${perSprint[n]} ч > ${limit} ч)`).join(', ')}`] : []),
+    ].join('; ')
+    return {
+      engineer_id: eid,
+      team_id: engTeam.get(eid) ?? '',
+      role: ENGINEERS.find((e) => e.engineer_id === eid)?.role ?? '',
+      capacity_rate: engRate.get(eid) ?? 1,
+      limit_hours_per_sprint: limit,
+      hours_per_sprint: perSprint,
+      total_hours: total,
+      tasks_count: tasks,
+      critical_roles: critical,
+      overloaded_sprints: overloaded,
+      risk: { level, affected_tasks: tasks, affected_hours: total, basis },
+    }
+  }).sort((a, b) => levelRank[a.risk.level] - levelRank[b.risk.level] || b.total_hours - a.total_hours || a.engineer_id.localeCompare(b.engineer_id))
+
+  return { plan_id: id, methodology: FORECAST_METHODOLOGY_MOCK, people }
 })
 
 // --- AI-советник (change 015): fallback-советы из warnings/metrics (упрощённый порт) ---
