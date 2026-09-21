@@ -14,14 +14,50 @@ docker compose up -d --build
 # Swagger: http://localhost:8000/docs
 ```
 
-Поднимаются: `db` (PostgreSQL 16) + `api` (uvicorn, dataset внутри образа — импорт демо-датасета работает сразу) +
-`frontend` (nginx + статика, проксирует `/api`, `/auth`, `/workspaces`, `/permissions` на api).
+Поднимаются: `db` (PostgreSQL 16, порт 5432) + `api` (uvicorn, порт 8000; dataset внутри
+образа — импорт демо-датасета работает сразу) + `frontend` (nginx, порт 5173, проксирует
+`/api`, `/auth`, `/workspaces`, `/permissions` на api).
 
-Профили: `--profile jobs` — Redis + arq-воркер фоновых джобов (change 007); профиль `optimizer`
-(Timefold-сайдкар, change 018) появится с влитием 018.
+### Полная связка с профилями (jobs + optimizer)
 
-Пересоздать данные: `POST /api/v1/data/import` (демо-датасет уже в образе). Старый `pgdata`
-с прошлой схемой лучше пересоздать: `docker compose down && docker volume rm <project>_pgdata`.
+Профили compose: `jobs` — Redis + arq-воркер фоновых джобов (change 007), `optimizer` —
+Timefold-сайдкар на Java 21 (change 018). Без профилей оптимизация отрабатывает эвристикой.
+
+```bash
+# 1) полный стек: db + api + frontend + redis/worker + optimizer
+docker compose --profile jobs --profile optimizer up -d --build
+
+# 2) проверить состояние (db/optimizer — healthcheck, остальные — Up)
+docker compose --profile jobs --profile optimizer ps
+curl -sf http://localhost:8000/healthz
+
+# 3) залить демо-датасет (idempotentно, пересоздаёт данные; нужна демо-сессия editor/admin)
+TOKEN=$(curl -s -X POST http://localhost:8000/auth/demo-login -H 'Content-Type: application/json' \
+  -d '{"role": "editor"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -X POST http://localhost:8000/api/v1/data/import -H "Authorization: Bearer $TOKEN"
+# или из UI: /login → демо-роль editor/admin → кнопка импорта на /data
+
+# 4) сценарий: /plan → «Сгенерировать» → «Оптимизировать» (при живом optimizer —
+#    режим solver; новая версия плана с assignments, личные планы /people/*, звёздная карта)
+```
+
+Первая сборка `optimizer` идёт через Maven Central по host-сети и занимает несколько минут;
+повторные — из docker-кэша. Переменные solver (`OPTIMIZER_SEED`,
+`OPTIMIZER_TIME_LIMIT_SECONDS`, `OPTIMIZER_STAFFING_GAIN_THRESHOLD`) — в
+`docker-compose.yml`, секция `optimizer.environment`.
+
+Только часть стека: `docker compose up -d db api` — без фронта (API на :8000);
+`docker compose --profile optimizer up -d optimizer` — дотянуть solver к уже работающей связке.
+
+Остановка/очистка:
+
+```bash
+docker compose --profile jobs --profile optimizer down          # остановить всё
+docker compose down -v                                          # + удалить pgdata (пересоздание БД)
+```
+
+Старый `pgdata` с прошлой схемой (без колонок новых change'ей) пересоздавать через `down -v`,
+затем импорт демо-датасета (шаг 3).
 
 ### Локально (uv)
 
