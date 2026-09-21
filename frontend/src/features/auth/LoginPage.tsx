@@ -1,57 +1,37 @@
 import { motion } from 'motion/react'
+import { LogIn } from 'lucide-react'
 import { useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
-import { Field, Input } from '@/components/ui/Field'
-import { demoLogin, login, type AuthRole } from '@/api/auth'
+import { demoLogin } from '@/api/auth'
 import { t } from '@/lib/motion'
 
-const ROLES: { role: AuthRole; label: string; hint: string }[] = [
-  { role: 'reader', label: 'Наблюдатель', hint: 'только просмотр' },
-  { role: 'editor', label: 'Редактор', hint: 'план, факты, приоритеты' },
-  { role: 'admin', label: 'Администратор', hint: 'подтверждение отмен, права' },
-]
-
-/** Вход: демо-роли (3 кнопки) или email/пароль (/auth/login). 401 просроченной сессии редиректит сюда. */
+/**
+ * Вход (change 024): единственное действие — «Войти как администратор»
+ * (/auth/demo-login, role=admin). Выбор ролей и email/пароль из UI убраны —
+ * серверная ролевая модель и JWT-ручки сохранены, но фронтом не используются.
+ */
 export function LoginPage() {
   const navigate = useNavigate()
-  const [params] = useSearchParams()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [busy, setBusy] = useState<AuthRole | 'login' | null>(null)
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const demo = async () => {
     setError(null)
-    setBusy('login')
+    setBusy(true)
     try {
-      await login(email.trim().toLowerCase(), password)
-      navigate('/workspaces', { replace: true })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Вход не удался')
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const demo = async (role: AuthRole) => {
-    setError(null)
-    setBusy(role)
-    try {
-      await demoLogin(role)
+      await demoLogin('admin')
       navigate('/workspaces', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Демо-вход не удался')
     } finally {
-      setBusy(null)
+      setBusy(false)
     }
   }
 
   return (
     <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 'var(--s-4)' }}>
-      <motion.form
-        onSubmit={(e) => { void submit(e) }}
+      <motion.div
         className="block"
         style={{ width: 'min(420px, 100%)', padding: 'var(--s-6)', display: 'grid', gap: 'var(--s-4)' }}
         initial={{ opacity: 0, transform: 'translateY(8px)' }}
@@ -61,41 +41,17 @@ export function LoginPage() {
           <img src="/favicon.svg" alt="" width={28} height={28} style={{ borderRadius: 6 }} />
           <div>
             <h1 style={{ fontSize: 'var(--text-xl)' }}>Вход в Квартал</h1>
-            <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>для тимлидов, ресурсных менеджеров и CTO</div>
+            <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>планирование команд в рабочих пространствах</div>
           </div>
         </div>
-        {params.get('expired') && (
-          <p className="callout" data-tone="shift" style={{ margin: 0 }}>
-            Сессия истекла — войдите заново.
-          </p>
-        )}
         {error && <p className="callout" data-tone="over" style={{ margin: 0 }}>{error}</p>}
-        <Field label="Email">
-          <Input type="email" name="email" autoComplete="email" spellCheck={false} placeholder="lead@company.ru"
-            value={email} onChange={(e) => setEmail(e.target.value)} />
-        </Field>
-        <Field label="Пароль">
-          <Input type="password" name="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        </Field>
-        <Button type="submit" variant="primary" loading={busy === 'login'}>
-          Войти
+        <Button variant="primary" icon={<LogIn />} loading={busy} onClick={() => { void demo() }}>
+          Войти как администратор
         </Button>
-        <div style={{ display: 'grid', gap: 'var(--s-2)', marginTop: 'var(--s-2)' }}>
-          <div className="muted" style={{ fontSize: 'var(--text-xs)', textAlign: 'center' }}>или демо-вход</div>
-          {ROLES.map(({ role, label, hint }) => (
-            <Button key={role} variant="secondary" loading={busy === role} disabled={busy !== null && busy !== role}
-              onClick={() => { void demo(role) }}>
-              <span style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                {label}
-                <small className="muted" style={{ fontSize: 'var(--text-2xs)', fontWeight: 400 }}>{hint}</small>
-              </span>
-            </Button>
-          ))}
-        </div>
-        <p className="muted" style={{ fontSize: 'var(--text-2xs)', textAlign: 'center' }}>
-          Роли checking side сервера; недоступные действия скрыты или отключены
+        <p className="muted" style={{ fontSize: 'var(--text-2xs)', textAlign: 'center', margin: 0 }}>
+          Демо-профиль администратора: полный доступ к данным и планам в ваших рабочих пространствах
         </p>
-      </motion.form>
+      </motion.div>
     </main>
   )
 }
