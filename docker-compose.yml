@@ -30,6 +30,9 @@ services:
     depends_on:
       - redis
     command: uv run arq src.ai.jobs_worker.WorkerSettings
+    env_file:
+      - path: .env
+        required: false   # воркер тоже ходит в LLM (нормализация, change 027)
     healthcheck:
       disable: true
     environment:
@@ -63,6 +66,9 @@ services:
     image: postcode-planner:latest
     build:
       context: .
+    env_file:
+      - path: .env
+        required: false   # LLM/прочие POSTCODE_* переменные (шаблон — example.env)
     depends_on:
       db:
         condition: service_healthy
