@@ -11,7 +11,6 @@ import json
 
 from pydantic import BaseModel, Field
 
-from src.ai.gigachat import GigaUnavailable, get_client
 from src.domain.models import SPRINTS_PER_QUARTER
 
 MAX_COMMENT = 500
@@ -96,7 +95,7 @@ _USER_PREFIX = "Сводка состояния плана (JSON):\n"
 
 
 def llm_advice(facts: dict, client) -> list[AdviceItem]:
-    """Ответ LLM → pydantic-валидация; невалид → GigaUnavailable-путь (retry на стороне ручки)."""
+    """Ответ LLM → pydantic-валидация; невалид → LLMUnavailable-путь (retry на стороне ручки)."""
     text = client.complete(
         _SYSTEM,
         _USER_PREFIX + json.dumps(facts, ensure_ascii=False),
