@@ -135,26 +135,28 @@ public class OptimizationConstraintProvider implements ConstraintProvider {
     }
 
     /** Ёмкость команды по SP: сумма планируемых SP в спринте не превышает velocity × 0,8.
-     *  Важно: без Math.round — бэковская валидация (capacity = velocity×0,8, е.g. 12.8) отвергает
-     *  раскладку, где сумма 13.0 > 12.8, а округление Java-порога до 13 её «прощало». */
+     *  Важно: сравнение в СОТЫХ (change 026) — снапшот передаёт части, округлённые до 2 знаков,
+     *  и бэковская валидация суммирует те же значения в сотых; десятые «прощали» стопку частей
+     *  5.33+1.33+1.0 = 7.66 против ёмкости 7.6 (Java: 53+13+10 = 76 десятых «влезает»). */
     Constraint teamSpCapacity(ConstraintFactory factory) {
         return factory.forEach(TaskPartAssignment.class)
                 .filter(a -> a.getSprint() != null)
                 .groupBy(
                         TaskPartAssignment::getTeamId,
                         TaskPartAssignment::getSprint,
-                        ConstraintCollectors.sum((TaskPartAssignment a) -> Math.round(a.getStoryPoints() * 10L)))
+                        ConstraintCollectors.sum((TaskPartAssignment a) -> Math.round(a.getStoryPoints() * 100L)))
                 .join(TeamVelocity.class,
-                        Joiners.equal((teamId, sprintIdTenths, spTenths) -> teamId, TeamVelocity::getTeamId))
-                .filter((teamId, sprintIdTenths, spTenths, velocity) ->
-                        spTenths > Math.round(velocity.getPlannedSp() * CAPACITY_UTILIZATION * 10L))
+                        Joiners.equal((teamId, sprintIdCenths, spCenths) -> teamId, TeamVelocity::getTeamId))
+                .filter((teamId, sprintIdCenths, spCenths, velocity) ->
+                        spCenths > Math.round(velocity.getPlannedSp() * CAPACITY_UTILIZATION * 100L))
                 .penalize(HardSoftScore.ONE_HARD,
-                        (teamId, sprintIdTenths, spTenths, velocity) ->
-                                spTenths - Math.round(velocity.getPlannedSp() * CAPACITY_UTILIZATION * 10L))
+                        (teamId, sprintIdCenths, spCenths, velocity) ->
+                                spCenths - Math.round(velocity.getPlannedSp() * CAPACITY_UTILIZATION * 100L))
                 .asConstraint("teamSpCapacity");
     }
 
-    /** Часы ролей в спринте не превышают суммарный лимит носителей роли (80×ставка; нет носителей — виртуальный держатель 80 ч). */
+    /** Часы ролей в спринте не превышают суммарный лимит носителей роли (80×ставка; нет носителей — виртуальный держатель 80 ч).
+     *  Сравнение в сотых — та же гранулярность, что у бэковской валидации (change 026). */
     Constraint roleHoursCapacity(ConstraintFactory factory) {
         return factory.forEach(TaskPartAssignment.class)
                 .filter(a -> a.getSprint() != null)
@@ -165,14 +167,14 @@ public class OptimizationConstraintProvider implements ConstraintProvider {
                 .groupBy(
                         RoleLoad::sprint,
                         RoleLoad::role,
-                        ConstraintCollectors.sum((RoleLoad load) -> Math.round(load.hours() * 10L)))
+                        ConstraintCollectors.sum((RoleLoad load) -> Math.round(load.hours() * 100L)))
                 .join(RoleCapacity.class,
-                        Joiners.equal((sprintIdTenths, role, hoursTenths) -> role, RoleCapacity::getRole))
-                .filter((sprintIdTenths, role, hoursTenths, capacity) ->
-                        hoursTenths > Math.round(capacity.getHours() * 10L))
+                        Joiners.equal((sprintIdCenths, role, hoursCenths) -> role, RoleCapacity::getRole))
+                .filter((sprintIdCenths, role, hoursCenths, capacity) ->
+                        hoursCenths > Math.round(capacity.getHours() * 100L))
                 .penalize(HardSoftScore.ONE_HARD,
-                        (sprintIdTenths, role, hoursTenths, capacity) ->
-                                hoursTenths - Math.round(capacity.getHours() * 10L))
+                        (sprintIdCenths, role, hoursCenths, capacity) ->
+                                hoursCenths - Math.round(capacity.getHours() * 100L))
                 .asConstraint("roleHoursCapacity");
     }
 
