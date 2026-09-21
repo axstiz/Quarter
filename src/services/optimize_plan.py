@@ -125,9 +125,11 @@ def _normalize_draft(response: dict, snapshot: dict, tasks: dict[str, Task],
                      mode: str) -> dict:
     """Черновик solver (assignments по part_id) → единая структура items/postponed."""
     part_sp: dict[tuple[str, int], float] = {}
+    part_hours: dict[tuple[str, int], dict[str, float]] = {}
     for t in snapshot["tasks"]:
         for p in t["parts"]:
             part_sp[(t["task_id"], p["part"])] = p["story_points"]
+            part_hours[(t["task_id"], p["part"])] = p.get("role_hours") or {}
 
     items = []
     item_tasks: set[str] = set()
@@ -142,8 +144,10 @@ def _normalize_draft(response: dict, snapshot: dict, tasks: dict[str, Task],
         item_tasks.add(task_id)
         items.append({
             "task_id": task_id,
+            "part": part,
             "sprint_no": sprint,
             "step_points_sp": float(part_sp.get((task_id, part), a.get("story_points", 0.0) or 0.0)),
+            "role_hours": dict(part_hours.get((task_id, part), {})),
             "team_id": a.get("team_id") or (tasks[task_id].team_id if task_id in tasks else ""),
         })
     postponed = [
@@ -175,8 +179,11 @@ def _heuristic_draft(tasks: dict[str, Task], engineers: list[Engineer],
         for it in s.items:
             items.append({
                 "task_id": it.task_id,
+                "part": it.sprint_no,  # эвристика: часть = спринт размещения (для совместимости ключей)
                 "sprint_no": s.sprint_no,
                 "step_points_sp": it.step_points_sp or 0.0,
+                "role_hours": {},  # часы уже разложены planner'ом в assignments
+                "assignments": [a.model_dump() for a in it.assignments],
                 "team_id": tasks[it.task_id].team_id if it.task_id in tasks else "",
             })
     return {
@@ -187,6 +194,140 @@ def _heuristic_draft(tasks: dict[str, Task], engineers: list[Engineer],
         "score_breakdown": [],
         "mode": "heuristic",
     }
+
+
+def _sole_holders_set(engineers: list[Engineer]) -> set[str]:
+    counts: dict[tuple[str, str], set[str]] = {}
+    for e in engineers:
+        counts.setdefault((e.team_id, _rl(e.role)), set()).add(e.engineer_id)
+    return {next(iter(ids)) for ids in counts.values() if len(ids) == 1}
+
+
+class _EngineerPool:
+    """Лимиты/роли инженеров + виртуальные держатели ролей без носителей (как в planner).
+
+    eng_used[sprint][engineer_id] — занятые часы; роль без носителей закрывается
+    виртуальным держателем с полной ставкой (80 ч/спринт).
+    """
+
+    def __init__(self, engineers: list[Engineer], tasks: dict[str, Task]):
+        self.limits: dict[str, float] = {}
+        self.roles: dict[str, set[str]] = defaultdict(set)
+        self.orig_role: dict[str, str] = {}
+        for eng in engineers:
+            self.limits[eng.engineer_id] = engineer_sprint_limit(eng.capacity_rate)
+            norm = _rl(eng.role)
+            self.roles[eng.engineer_id].add(norm)
+            self.orig_role[norm] = eng.role
+        all_roles = {_rl(rl): rl for t in tasks.values() for rl in (t.role_hours or {})}
+        for idx, (norm, orig) in enumerate(sorted(all_roles.items())):
+            if norm not in self.orig_role:
+                vid = f"VIRTUAL-PM-{idx}"
+                self.limits[vid] = engineer_sprint_limit(1.0)
+                self.roles[vid].add(norm)
+                self.orig_role[norm] = orig
+        self.used: dict[int, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+
+    def holders(self, norm_role: str) -> list[str]:
+        return sorted(e for e, roles in self.roles.items() if norm_role in roles)
+
+    def place(self, norm_role: str, hours: float, sprint: int) -> tuple[float, list[dict]]:
+        """Жадное заполнение (planner._put_hours): по свободному остатку лимита, детерминированно."""
+        placed = 0.0
+        assignments: list[dict] = []
+        for eid in self.holders(norm_role):
+            if placed >= hours - 1e-9:
+                break
+            free = self.limits[eid] - self.used[sprint][eid]
+            if free <= 1e-9:
+                continue
+            put = min(hours - placed, free)
+            self.used[sprint][eid] += put
+            placed += put
+            assignments.append({"engineer_id": eid, "hours": round(put, 2)})
+        return round(placed, 2), assignments
+
+    def rollback(self, placements: list[dict], sprint: int) -> None:
+        for p in placements:
+            self.used[sprint][p["engineer_id"]] -= p["hours"]
+
+
+def _allocate_assignments(draft: dict, tasks: dict[str, Task],
+                          engineers: list[Engineer], history: list[TeamHistory]) -> None:
+    """022 §2.1–2.3: раскладка часов ролей частей по конкретным носителям.
+
+    - каждая часть пытается разместиться в своём спринте (роли целиком);
+    - не влезла (лимиты 80/40 заняты) — сдвиг на первый следующий спринт,
+      где хватает и роли, и SP-ёмкости команды (жадные сдвиги);
+    - не влезло до конца квартала — часть остаётся в своём спринте с тем,
+      что поместилось, и причиной «выполнится частично (остаток N ч …)»;
+      пер-специалистов невыполнимость НЕ даёт 422 — только сдвиг/частичность.
+    """
+    pool = _EngineerPool(engineers, tasks)
+    by_team_hist: dict[str, list[TeamHistory]] = defaultdict(list)
+    for h in history:
+        by_team_hist[h.team_id].append(h)
+    sp_left: dict[tuple[int, str], float] = {}
+    for sprint in range(1, SPRINTS_PER_QUARTER + 1):
+        for team in {t.team_id for t in tasks.values()}:
+            sp_left[(sprint, team)] = team_capacity_sp(by_team_hist.get(team, []))
+
+    items = sorted(draft["items"], key=lambda i: (i["sprint_no"], i["task_id"], i.get("part", 1)))
+    for item in items:
+        roles = {r: h for r, h in (item.get("role_hours") or {}).items() if h > 1e-9}
+        item_sp = float(item.get("step_points_sp") or 0.0)
+        team = item.get("team_id") or (tasks[item["task_id"]].team_id if item["task_id"] in tasks else "")
+        own = int(item["sprint_no"])
+
+        target: int | None = None
+        for sprint in range(own, SPRINTS_PER_QUARTER + 1):
+            if sp_left[(sprint, team)] + 1e-9 < item_sp:
+                continue
+            trial: list[tuple[str, list[dict]]] = []
+            ok = True
+            for norm_role in sorted(roles):
+                placed, assigns = pool.place(norm_role, roles[norm_role], sprint)
+                trial.append((norm_role, assigns))
+                if placed + 1e-9 < roles[norm_role]:
+                    ok = False
+                    break
+            if ok:
+                target = sprint
+                break
+            for _, assigns in trial:
+                pool.rollback(assigns, sprint)
+
+        if target is not None:
+            item["sprint_no"] = target
+            sp_left[(target, team)] -= item_sp
+            assignments: list[dict] = []
+            for norm_role, assigns in trial:
+                for a in assigns:
+                    assignments.append({
+                        "task_id": item["task_id"], "role": pool.orig_role.get(norm_role, norm_role),
+                        "engineer_id": a["engineer_id"], "sprint_no": target,
+                        "hours": a["hours"], "is_pinned": False,
+                    })
+            item["assignments"] = assignments
+            continue
+
+        # частично: в своём спринте кладём сколько влезает, остаток — за пределами квартала
+        leftover = 0.0
+        assignments = []
+        for norm_role in sorted(roles):
+            placed, assigns = pool.place(norm_role, roles[norm_role], own)
+            leftover += roles[norm_role] - placed
+            for a in assigns:
+                assignments.append({
+                    "task_id": item["task_id"], "role": pool.orig_role.get(norm_role, norm_role),
+                    "engineer_id": a["engineer_id"], "sprint_no": own,
+                    "hours": a["hours"], "is_pinned": False,
+                })
+        if assignments:
+            sp_left[(own, team)] -= item_sp
+        item["assignments"] = assignments
+        if leftover > 0.05:
+            item["partial_leftover_hours"] = round(leftover, 2)
 
 
 def _sole_holders_set(engineers: list[Engineer]) -> set[str]:
@@ -281,14 +422,21 @@ async def apply_draft(session, workspace_id: str, source_plan_id: str, draft: di
     )
 
     for it in draft["items"]:
+        assignments = it.get("assignments") or []
+        reason = f"{reason_prefix}; задача {it['task_id']} в спринт {it['sprint_no']}"
+        leftover = it.get("partial_leftover_hours")
+        if leftover:
+            # 022 §2.2: пер-специалистов невыполнимость — честная частичность, не ошибка
+            reason += f"; выполнится частично (остаток {leftover} ч — за пределами квартала)"
         session.add(PlanItemORM(
             plan_id=new_orm.plan_id,
             task_id=it["task_id"],
             team_id=it["team_id"],
             decision="planned",
             sprint_no=it["sprint_no"],
-            reason=f"{reason_prefix}; задача {it['task_id']} в спринт {it['sprint_no']}",
+            reason=reason,
             planned_sp=it["step_points_sp"],
+            assignments=[dict(a) for a in assignments],
         ))
     for d in draft["postponed"]:
         task = tasks_map.get(d["task_id"])
@@ -329,6 +477,8 @@ async def run_optimization(session, workspace_id: str, plan_id: str, author_id: 
         violations = validate_draft(draft, tasks_map, engineers, history, deps)
         if violations:
             raise DraftValidationError("; ".join(violations[:5]))
+        # 022: пер-специалистов раскладка после solve (сдвиги/частичность — не 422)
+        _allocate_assignments(draft, tasks_map, engineers, history)
 
     if draft["staffing_moves"] and not require_staffing:
         raise StaffingPermissionError("черновик требует переноса людей (право plans_optimize_staffing)")
