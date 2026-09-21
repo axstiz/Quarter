@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     String,
     UniqueConstraint,
@@ -46,8 +47,8 @@ class MembershipORM(Base):
 
 class TaskORM(Base):
     __tablename__ = "tasks"
+    workspace_id: Mapped[str] = mapped_column(String, primary_key=True, default="default")
     task_id: Mapped[str] = mapped_column(String, primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
     source: Mapped[str] = mapped_column(String, default="imported")
     priority: Mapped[int] = mapped_column(Integer, default=100)
     parent_id: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -68,10 +69,17 @@ class RoleRequirementORM(Base):
     __tablename__ = "task_role_requirements"
     workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
-    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.task_id"), index=True)
+    task_id: Mapped[str] = mapped_column(String, index=True)
     role: Mapped[str] = mapped_column(String)
     hours: Mapped[float] = mapped_column(Float)
     source: Mapped[str] = mapped_column(String, default="imported")
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "task_id"],
+            ["tasks.workspace_id", "tasks.task_id"],
+            ondelete="CASCADE",
+        ),
+    )
 
 
 class DependencyORM(Base):
@@ -110,7 +118,7 @@ class TeamHistoryORM(Base):
 
 class TeamORM(Base):
     __tablename__ = "teams"
-    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
+    workspace_id: Mapped[str] = mapped_column(String, primary_key=True, default="default")
     team_id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, default="")
     source: Mapped[str] = mapped_column(String, default="manual")
