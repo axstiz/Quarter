@@ -1,0 +1,3 @@
+# Design: 032-pin-defer
+
+Пин-ручка упрощается до «метка намерения» на текущей версии (update PlanItemORM.pinned_* для выбранного task_id; отсутствия AAA-версии не было). Пересчёт становится единственным путем расстановки: /recompute и факт-роут собирают pins из plan items (pinned_sprint != null) -> generate_plan(..., pins=pins). Лёгкие валидации (спринт bounds, факт-закрытый спринт, конфликт зависимостей) сохранены; конфыикты ёмкости детектируются при пересчёте стандартными warning'ами (Pin не влезает — pre-occupancy по спеке). Фронт: после success pin — invalidate плана (метки), баннер по pending-пинам (pins_with target≠current). spec delta включает MODIFIED Requirement полностью (все 4 старых сценария copy + новые 2).
