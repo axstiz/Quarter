@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.context import Context, require_context
 from src.api.permissions import require_permission
-from src.db.models import DependencyORM, EngineerORM, TaskORM, TeamHistoryORM, TeamORM
+from src.db.models import DependencyORM, EngineerORM, RoleRequirementORM, TaskORM, TeamHistoryORM, TeamORM
 from src.db.session import get_session
 
 router = APIRouter(prefix="/api/v1", tags=["onboarding-crud"])
@@ -24,13 +24,17 @@ class EngineerIn(BaseModel):
 
 
 class TaskIn(BaseModel):
-    task_id: str
+    task_id: str | None = None  # обязательного при PUT нет: запись определяется по пути
     team_id: str | None = None
     summary: str | None = None
     status: str | None = None
     estimation_sp: float | None = None
     estimated_hh: float | None = None
     planned_result: str | None = None
+
+
+class RoleHoursIn(BaseModel):
+    role_hours: dict[str, float]
 
 
 class DependencyIn(BaseModel):
@@ -80,11 +84,15 @@ async def update_engineer(engineer_id: str, body: EngineerIn, ctx: Context = Dep
         EngineerORM.engineer_id == engineer_id, EngineerORM.workspace_id == ctx.workspace_id))).scalars().all()
     if not rows:
         raise HTTPException(status_code=404, detail="не найден")
+    # идентификатор не редактируется (019 §3.3) — правка сломала бы assignments планов
+    if body.engineer_id and body.engineer_id != engineer_id:
+        raise HTTPException(status_code=409, detail="engineer_id менять нельзя")
     for eng in rows:
-        if eng.source == "manual":
-            for field in ("team_id", "role", "grade", "skills_declared", "capacity_rate"):
-                if getattr(body, field) is not None:
-                    setattr(eng, field, getattr(body, field))
+        # правка через редактор переводит запись в manual (спека onboarding: правки защищены от затирания импортом)
+        for field in ("team_id", "role", "grade", "skills_declared", "capacity_rate"):
+            if getattr(body, field) is not None:
+                setattr(eng, field, getattr(body, field))
+        eng.source = "manual"
     await ctx.session.commit()
     return {"status": "updated", "engineer_id": engineer_id}
 
@@ -125,6 +133,9 @@ async def update_task(task_id: str, body: TaskIn, ctx: Context = Depends(require
         TaskORM.task_id == task_id, TaskORM.workspace_id == ctx.workspace_id))).scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="не найдена")
+    # идентификаторы не редактируются (019 §3.3): смена ключа сломала бы ссылки зависимостей/планов
+    if body.task_id and body.task_id != task_id:
+        raise HTTPException(status_code=409, detail="task_id менять нельзя — создайте новую задачу")
     for field in ("team_id", "summary", "status", "estimation_sp", "estimated_hh"):
         val = getattr(body, field)
         if val is not None:
@@ -132,6 +143,33 @@ async def update_task(task_id: str, body: TaskIn, ctx: Context = Depends(require
     task.source = "manual"
     await ctx.session.commit()
     return {"status": "updated", "task_id": task_id}
+
+
+@router.put("/tasks/{task_id}/role-hours")
+async def set_task_role_hours(task_id: str, body: RoleHoursIn,
+                              ctx: Context = Depends(require_permission("crud_tasks"))):
+    """Замена набора часы-ролей задачи (019 §2.2): нулевые/отрицательные отбрасываются,
+    существующие роли не носителей сохраняются как есть. Правка делает записи ручными (source=manual)."""
+    task = (await ctx.session.execute(select(TaskORM).where(
+        TaskORM.task_id == task_id, TaskORM.workspace_id == ctx.workspace_id))).scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="не найдена")
+    await ctx.session.execute(delete(RoleRequirementORM).where(
+        RoleRequirementORM.workspace_id == ctx.workspace_id, RoleRequirementORM.task_id == task_id))
+    stored: dict[str, float] = {}
+    for role, hours in body.role_hours.items():
+        hours_num = float(hours or 0)
+        if hours_num <= 0:
+            continue
+        role_name = role.strip()
+        if not role_name:
+            continue
+        ctx.session.add(RoleRequirementORM(
+            workspace_id=ctx.workspace_id, task_id=task_id, role=role_name, hours=hours_num, source="manual"))
+        stored[role_name] = hours_num
+    task.source = "manual"
+    await ctx.session.commit()
+    return {"status": "updated", "task_id": task_id, "role_hours": stored}
 
 
 @router.delete("/tasks/{task_id}")

@@ -305,6 +305,7 @@ export interface TaskInfo {
 export interface Dependency {
   blocking_task_id: string
   blocked_task_id: string
+  dependency_type?: string
 }
 
 export type EngineerFilters = Partial<{

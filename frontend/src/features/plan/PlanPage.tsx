@@ -2,7 +2,7 @@ import { CalendarRange, Lightbulb, RotateCcw, ShieldAlert, Sparkles, Upload } fr
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { canEdit, getRole } from '@/api/auth'
+import { canEdit, getRole, getWorkspaceId } from '@/api/auth'
 import { ApiError } from '@/api/client'
 import { api } from '@/api/endpoints'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -23,6 +23,16 @@ import { RolesView } from './RolesView'
 import { TaskPanelContent } from './TaskPanel'
 import { AdvicePanelContent } from './AdvicePanel'
 import { Panel } from '@/components/ui/Panel'
+
+/** 019 §3.1: правился ли датасет после создания активной версии плана (localStorage per workspace). */
+function dataEditedAfter(planCreatedAt: string | undefined): boolean {
+  if (!planCreatedAt) return false
+  try {
+    const marker = new Date(localStorage.getItem(`quarter-data-edited:${getWorkspaceId()}`) ?? 0).getTime()
+    const created = new Date(planCreatedAt.replace(' ', 'T')).getTime() // «YYYY-MM-DD HH:MM:SS» как у бэка
+    return Number.isFinite(marker) && marker > created
+  } catch { return false }
+}
 
 export function PlanPage() {
   const planId = useCurrentPlanId()
@@ -63,6 +73,8 @@ export function PlanPage() {
   const model = useMemo(() => (plan.data ? buildPlanModel(plan.data, tasks.data ?? []) : null), [plan.data, tasks.data])
   const fixedSprints = useMemo(() => new Set(facts.data?.map((f) => f.sprint_no)), [facts.data])
   const factSprintOf = useMemo(() => new Map(facts.data?.flatMap((f) => f.completed_task_ids.map((id) => [id, f.sprint_no] as const))), [facts.data])
+  const updatedAtVersion = useMemo(() => versions.data?.at(-1)?.created_at, [versions.data])
+  const showStaleDataBanner = useMemo(() => dataEditedAfter(updatedAtVersion), [updatedAtVersion])
   const latestId = versions.data?.at(-1)?.plan_id
   const readOnly = (!!planId && !!latestId && planId !== latestId) || !canEdit(getRole())
 
@@ -171,6 +183,23 @@ export function PlanPage() {
             </Button>
           </div>
         </div>
+
+        {showStaleDataBanner && (
+          <div className="callout" data-tone="shift" role="status" style={{ marginBottom: 'var(--s-4)' }}>
+            <div className="callout__title">Данные изменились — постройте план заново</div>
+            <p style={{ margin: 0 }}>
+              Датасет правился в редакторе «Данные» после создания активной версии. Существующие версии истории не переписываются.
+              {!canEdit(getRole()) && ' Правка недоступна наблюдателю.'}
+            </p>
+            {canEdit(getRole()) && (
+              <div style={{ marginTop: 8 }}>
+                <Button variant="primary" size="sm" loading={generate.isPending} onClick={runGenerate}>
+                  Построить план заново
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
 
         {plan.error ? (
           <ErrorAlert error={plan.error} onRetry={() => plan.refetch()} />
