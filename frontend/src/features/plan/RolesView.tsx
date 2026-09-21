@@ -1,15 +1,13 @@
 import { Check, ChevronDown, RotateCcw } from 'lucide-react'
 import { useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { USE_MOCKS } from '@/api/client'
-import { useEngineers, useTeamDetails } from '@/api/queries'
+import { useEngineers, usePinTask, useTeamDetails, useUnpinAllTasks, useUnpinTask } from '@/api/queries'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { SearchInput, Select } from '@/components/ui/Field'
 import { Meter } from '@/components/ui/Meter'
-import { ErrorAlert, SkeletonRows } from '@/components/ui/States'
+import { ErrorAlert, errorHint, errorTitle, SkeletonRows } from '@/components/ui/States'
 import { fmt, plural, sprintWeeks } from '@/lib/format'
-import { cardKey, loadPlacement, partKey, persistPlacement } from '@/lib/ganttOverrides'
 import { buildRoleModel, type RoleChip, type RoleLane } from '@/lib/roleModel'
 import { SPRINT_NUMBERS, type PlanModel } from '@/lib/planModel'
 import { useParam } from '@/lib/useParam'
@@ -48,19 +46,27 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
   const [team, setTeam] = useParam('team')
   const [q, setQ] = useParam('q')
   const engineers = useEngineers({})
+  const pin = usePinTask(planId)
+  const unpin = useUnpinTask(planId)
+  const unpinAll = useUnpinAllTasks(planId)
 
-  // Раскладка Ганта — единый источник размещений; ручные переносы делаются здесь
-  const [placement, setPlacement] = useState<Record<string, number>>(() => (USE_MOCKS ? loadPlacement(planId) : {}))
+  // Закрепления приходят из плана (pinned_sprint у план-айтемов) — сервер пересобирает план после pin
   const [drag, setDrag] = useState<DragState | null>(null)
   const [feedback, setFeedback] = useState<{ text: string; error?: boolean } | null>(null)
   const [lastMove, setLastMove] = useState<{ chip: RoleChip; from: number; target: number } | null>(null)
+  const [failedPins, setFailedPins] = useState<string[]>([])
   const suppressClick = useRef<string | null>(null)
   const [collapsed, setCollapsed] = useState<string[]>([])
   const [openCarriers, setOpenCarriers] = useState<string[]>([])
   const [hover, setHover] = useState<HoverCard | null>(null)
 
-  const roleModel = useMemo(() => buildRoleModel(model, engineers.data ?? [], placement), [model, engineers.data, placement])
-  const changed = Object.keys(placement).length
+  const roleModel = useMemo(() => buildRoleModel(model, engineers.data ?? []), [model, engineers.data])
+  const pinnedIds = useMemo(
+    () =>
+      [...new Set([...model.tasks.values()].flatMap((t) => t.rows.filter((r) => r.pinned_sprint != null).map((r) => r.task_id)))].sort(),
+    [model],
+  )
+  const busy = pin.isPending || unpin.isPending || unpinAll.isPending
 
   const query = (q ?? '').trim().toLowerCase()
   const filtered = !!(team || query)
@@ -77,10 +83,9 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
       for (const row of s.rows) {
         const task = model.tasks.get(row.task_id)
         if (!task || row.sprint_no == null) continue
-        const target = placement[cardKey(task.task_id, row)] ?? row.sprint_no
         const bySprint = map.get(task.team_id) ?? new Map<number, { sp: number; count: number }>()
-        const cur = bySprint.get(target) ?? { sp: 0, count: 0 }
-        bySprint.set(target, {
+        const cur = bySprint.get(row.sprint_no) ?? { sp: 0, count: 0 }
+        bySprint.set(row.sprint_no, {
           sp: cur.sp + (row.decision !== 'done_actual' ? (row.step_points_sp ?? 0) : 0),
           count: cur.count + 1,
         })
@@ -88,7 +93,7 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
       }
     }
     return map
-  }, [model, placement])
+  }, [model])
 
   const laneChips = (lane: RoleLane) => SPRINT_NUMBERS.flatMap((n) => lane.cells.get(n)?.chips ?? [])
   const visibleTeams = roleModel.teams
@@ -108,33 +113,24 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
     })
   }
 
-  // --- ручная раскладка: drag пер partes весь (все ролевые чипы части вместе) ---
+  // --- переносы через бэк-pin (016/020): drag → POST pin, сервер пересобирает план ---
 
-  const canEdit = USE_MOCKS && !readOnly
+  const canEdit = !readOnly
 
-  const partTarget = (chip: RoleChip) => placement[partKey(chip.taskId, chip.sprintNo)] ?? chip.sprintNo
-
-  /** Целевой спринт валиден: внутри квартала, не зафиксирован фактом, и в нём нет другой части задачи. */
-  const validTarget = (chip: RoleChip, target: number): boolean => {
-    if (!SPRINT_NUMBERS.includes(target) || fixedSprints.has(target)) return false
-    const task = model.tasks.get(chip.taskId)
-    return !task?.rows.some((row) => {
-      if (row.sprint_no === chip.sprintNo) return false
-      const projected = row.sprint_no != null ? (placement[cardKey(task.task_id, row)] ?? row.sprint_no) : null
-      return projected === target
-    })
-  }
+  /** Целевой спринт валиден: внутри квартала, не зафиксирован фактом, и сервер его не отклонял (409). */
+  const validTarget = (chip: RoleChip, target: number): boolean =>
+    SPRINT_NUMBERS.includes(target) && !fixedSprints.has(target) && !failedPins.includes(`${chip.taskId}:${target}`)
 
   const invalidReason = (chip: RoleChip, target: number | null): string => {
     if (target == null || !SPRINT_NUMBERS.includes(target)) return 'Вне квартала'
     if (fixedSprints.has(target)) return 'Спринт закрыт по факту'
-    if (!validTarget(chip, target)) return 'Здесь уже стоит другая часть этой задачи'
+    if (failedPins.includes(`${chip.taskId}:${target}`)) return 'сервер отклонил этот перенос, цель заблокирована'
     return 'Перенос недоступен'
   }
 
   const pickUp = (chip: RoleChip, hours: number) => (event: ReactPointerEvent<HTMLButtonElement>) => {
     setHover(null)
-    if (!canEdit || chip.decision === 'done_actual' || (event.pointerType === 'mouse' && event.button !== 0)) return
+    if (!canEdit || busy || chip.decision === 'done_actual' || (event.pointerType === 'mouse' && event.button !== 0)) return
     event.currentTarget.setPointerCapture(event.pointerId)
     setFeedback(null)
     setLastMove(null)
@@ -145,15 +141,6 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
     if (!drag) return
     const target = Number(document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-sprint-cell]')?.dataset.sprintCell) || null
     setDrag({ ...drag, x: event.clientX, y: event.clientY, target, valid: target != null && validTarget(drag.chip, target) })
-  }
-
-  const applyMove = (chip: RoleChip, target: number) => {
-    const next = { ...placement }
-    const key = partKey(chip.taskId, chip.sprintNo)
-    if (target === chip.sprintNo) delete next[key]
-    else next[key] = target
-    setPlacement(next)
-    persistPlacement(planId, next)
   }
 
   const drop = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -168,26 +155,43 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
       setFeedback({ text: `${current.chip.taskId}: ${invalidReason(current.chip, target)}`, error: true })
       return
     }
-    const from = partTarget(current.chip)
-    if (target === from) return
+    if (target === current.chip.sprintNo) return
     suppressClick.current = chipId(current.chip)
-    setLastMove({ chip: current.chip, from, target })
-    applyMove(current.chip, target)
-    setFeedback({ text: `${current.chip.taskId} · часть ${current.chip.part} → спринт ${target}` })
+    setLastMove({ chip: current.chip, from: current.chip.sprintNo, target })
+    setFeedback({ text: `${current.chip.taskId} · перенос в спринт ${target}…` })
+    pin.mutate(
+      { taskId: current.chip.taskId, sprintNo: target },
+      {
+        onSuccess: () => setFeedback({ text: `${current.chip.taskId} закреплена за спринтом ${target} (план пересобран)` }),
+        onError: (e) => {
+          // 409 (конфликт ёмкости/зависимости) и прочие ошибки: без повторов на ту же цель
+          setFailedPins((before) => [...before, `${current.chip.taskId}:${target}`])
+          setLastMove(null)
+          setFeedback({ text: `${current.chip.taskId}: ${errorTitle(e)}${errorHint(e) ? ` — ${errorHint(e)}` : ''}`, error: true })
+        },
+      },
+    )
   }
 
   const revert = () => {
     if (!lastMove) return
-    applyMove(lastMove.chip, lastMove.from)
-    setFeedback({ text: `${lastMove.chip.taskId} возвращено в спринт ${lastMove.from}` })
+    const move = lastMove
     setLastMove(null)
+    unpin.mutate(move.chip.taskId, {
+      onSuccess: () => setFeedback({ text: `${move.chip.taskId} возвращено: закрепление снято` }),
+      onError: (e) => setFeedback({ text: `${move.chip.taskId}: ${errorTitle(e)}`, error: true }),
+    })
   }
 
   const reset = () => {
-    setPlacement({})
-    persistPlacement(planId, {})
-    setFeedback({ text: 'Раскладка сброшена' })
-    setLastMove(null)
+    unpinAll.mutate(pinnedIds, {
+      onSuccess: () => {
+        setFailedPins([])
+        setFeedback({ text: 'Раскладка сброшена: закрепления сняты' })
+        setLastMove(null)
+      },
+      onError: (e) => setFeedback({ text: `${errorTitle(e)}${errorHint(e) ? ` — ${errorHint(e)}` : ''}`, error: true }),
+    })
   }
 
   return (
@@ -202,7 +206,11 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
         />
         <div className="toolbar__end">
           {filtered && <Button size="sm" variant="ghost" onClick={() => { setTeam(null); setQ(null) }}>Сбросить фильтры</Button>}
-          {!readOnly && changed > 0 && <Button size="sm" variant="secondary" icon={<RotateCcw />} onClick={reset}>Сбросить переносы · {changed}</Button>}
+          {!readOnly && pinnedIds.length > 0 && (
+            <Button size="sm" variant="secondary" icon={<RotateCcw />} loading={unpinAll.isPending} onClick={reset}>
+              Сбросить закрепления · {pinnedIds.length}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -212,7 +220,7 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
           <span>задачи ролей и носители · раскладка синхронна с «Диаграммой Ганта»</span>
         </div>
         <div className="gantt-feedback" data-error={feedback?.error || undefined}>
-          <span role="status" aria-live="polite">{drag ? 'Отпустите на колонке спринта' : feedback?.text ?? (readOnly ? 'Версия плана только для чтения' : 'Перетащите чип — вся задача переедет в другой спринт')}</span>
+          <span role="status" aria-live="polite">{drag ? 'Отпустите на колонке спринта' : feedback?.text ?? (readOnly ? 'Версия плана только для чтения' : 'Перетащите чип — задача закрепится за другим спринтом (pin: сервер пересоберёт план)')}</span>
           {lastMove && feedback && !drag && <button type="button" onClick={revert}>Вернуть</button>}
         </div>
       </div>
@@ -332,8 +340,9 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
             <p className="people__note">
               Часы в ячейке — потребность задач спринта в этой роли; лимит — Σ (80 ч × ставка носителей). Задача без носителей роли
               в своей команде уходит команде с наибольшим свободным лимитом (пунктир — заём); если носителей роли нет во всей компании,
-              в команде задачи красная метка — «виртуальный держатель». Перетаскивание меняет спринт задачи (часть целиком, вместе с
-              SP и остальными ролями), не носителя роли; раскладка совпадает с «Диаграммой Ганта».
+              в команде задачи красная метка — «виртуальный держатель». Перетаскивание закрепляет задачу за спринтом (pin): сервер
+              пересобирает план на этой же версии, перенос меняет спринт задачи целиком (вместе с SP и остальными ролями), не носителя
+              роли; раскладка совпадает с «Диаграммой Ганта» и видна при пересчёте.
             </p>
           </div>
         </div>
@@ -355,7 +364,7 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
             {hover.chip.decision === 'done_actual' ? 'Выполнено по факту' : 'Запланировано'}
             {hover.chip.loan && ` · заём из команды ${hover.chip.taskTeamId}`}
           </div>
-          <div className="people__card-hint">Нажмите, чтобы открыть карточку задачи{!readOnly && hover.chip.decision !== 'done_actual' ? '; перетащите — сменить спринт' : ''}</div>
+            <div className="people__card-hint">Нажмите, чтобы открыть карточку задачи{!readOnly && hover.chip.decision !== 'done_actual' ? '; перетащите — закрепить за другим спринтом (pin)' : ''}</div>
         </div>,
         document.body,
       )}

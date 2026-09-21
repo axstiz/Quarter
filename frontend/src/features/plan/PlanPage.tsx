@@ -155,7 +155,15 @@ export function PlanPage() {
               />
               <div className="stat">
                 <span className="stat__label">Зависят от одного носителя</span>
-                <span className="stat__value">{plan.data && bus.data && planRisk.data ? <AnimatedNumber value={planRisk.data.total_at_risk} /> : <span className="skeleton" style={{ display: 'inline-block', width: 40, height: 20 }} />}</span>
+                <span className="stat__value">
+                  {planRisk.error ? (
+                    <span title="Ошибка ручки bus-risk — подробности в панели рисков">—</span>
+                  ) : plan.data && bus.data && planRisk.data ? (
+                    <AnimatedNumber value={planRisk.data.total_at_risk} />
+                  ) : (
+                    <span className="skeleton" style={{ display: 'inline-block', width: 40, height: 20 }} />
+                  )}
+                </span>
                 {planRisk.data != null && planRisk.data.total_at_risk > 0 && (
                   <Button size="sm" variant="ghost" className="stat__action" icon={<ShieldAlert />} onClick={() => { setTaskId(null); setRiskPanel('1') }}>
                     Какие задачи
@@ -177,7 +185,7 @@ export function PlanPage() {
             {!plan.data || !model || tasks.isLoading ? (
               <SkeletonRows rows={8} cols={6} />
             ) : current === 'sprints' ? (
-              <GanttView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} planRisk={planRisk.data} factSprintOf={factSprintOf} selectedId={taskId} onSelect={openTask} />
+              <GanttView key={plan.data.plan_id} model={model} planRisk={planRisk.data} factSprintOf={factSprintOf} selectedId={taskId} onSelect={openTask} />
             ) : current === 'roles' ? (
               <RolesView key={plan.data.plan_id} model={model} planId={plan.data.plan_id} fixedSprints={fixedSprints} readOnly={readOnly} selectedId={taskId} onSelect={openTask} />
             ) : current === 'load' ? (
@@ -197,7 +205,7 @@ export function PlanPage() {
         title={taskId ? (model?.tasks.get(taskId)?.summary ?? tasks.data?.find((t) => t.task_id === taskId)?.summary ?? taskId) : 'Задачи под угрозой'}
       >
         {model && plan.data && taskId && <TaskPanelContent model={model} planId={plan.data.plan_id} taskId={taskId} tasksInfo={tasks.data ?? []} busFactor={bus.data} readOnly={readOnly} onSelect={openTask} />}
-        {plan.data && !taskId && riskPanel === '1' && <RiskPanelContent planRisk={planRisk.data} onSelect={openTask} />}
+        {plan.data && !taskId && riskPanel === '1' && <RiskPanelContent planRisk={planRisk.data} error={planRisk.error} onRetry={() => planRisk.refetch()} onSelect={openTask} />}
       </Panel>
 
       <ConfirmDialog

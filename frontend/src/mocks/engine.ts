@@ -16,6 +16,8 @@ export interface Item {
   sprint_no: number | null
   reason: string
   step_points_sp: number | null
+  /** pin (016): закрепление задачи за спринтом (наследуется из ItemRow в GET /plans/:id) */
+  pinned_sprint?: number | null
 }
 
 export interface EnginePlan {

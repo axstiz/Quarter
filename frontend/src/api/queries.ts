@@ -181,3 +181,33 @@ export function useCancelTask(planId: string) {
     onSuccess: invalidate,
   })
 }
+
+// --- pin/unpin (016/020): переносы через бэк; сервер пересобирает план на той же версии ---
+
+export function usePinTask(planId: string) {
+  const invalidate = useInvalidatePlans()
+  return useMutation({
+    mutationFn: ({ taskId, sprintNo }: { taskId: string; sprintNo: number }) =>
+      api.pinTask(planId, taskId, { sprint_no: sprintNo }),
+    onSuccess: invalidate,
+  })
+}
+
+export function useUnpinTask(planId: string) {
+  const invalidate = useInvalidatePlans()
+  return useMutation({
+    mutationFn: (taskId: string) => api.unpinTask(planId, taskId),
+    onSuccess: invalidate,
+  })
+}
+
+/** «Сбросить переносы»: снять закрепления со всех pin-задач плана (по одной, чтобы не гонять БД параллельно). */
+export function useUnpinAllTasks(planId: string) {
+  const invalidate = useInvalidatePlans()
+  return useMutation({
+    mutationFn: async (taskIds: string[]) => {
+      for (const id of taskIds) await api.unpinTask(planId, id)
+    },
+    onSuccess: invalidate,
+  })
+}

@@ -59,7 +59,7 @@ function planFromRows(planId: string): EnginePlan {
   const bySprint = new Map<number, Item[]>()
   const decisions: Item[] = []
   for (const it of items.filter((i) => i.plan_id === planId)) {
-    const item: Item = { task_id: it.task_id, decision: it.decision, sprint_no: it.sprint_no, reason: it.reason, step_points_sp: it.planned_sp }
+    const item: Item = { task_id: it.task_id, decision: it.decision, sprint_no: it.sprint_no, reason: it.reason, step_points_sp: it.planned_sp, pinned_sprint: it.pinned_sprint }
     if (it.decision === 'planned') bySprint.set(it.sprint_no ?? 0, [...(bySprint.get(it.sprint_no ?? 0) ?? []), item])
     else decisions.push({ task_id: it.task_id, decision: it.decision, sprint_no: it.sprint_no, reason: it.reason, step_points_sp: null })
   }
@@ -180,6 +180,7 @@ on('GET', '/plans/:id', ([id]): Plan => {
       task_id: i.task_id, decision: i.decision, sprint_no: i.sprint_no, reason: i.reason, step_points_sp: i.step_points_sp,
       summary: t?.summary ?? '', parent_id: t?.parent_id ?? null, estimation_sp: t?.estimation_sp ?? 0, estimated_hh: t?.estimated_hh ?? 0,
       planned_in_sprint: t ? t.status !== 'Done' : false, team_id: t?.team_id ?? '', role_hours: t?.role_hours ?? {},
+      pinned_sprint: i.pinned_sprint ?? null, pinned_engineer_id: null,
     }
   }
   return {
@@ -266,42 +267,77 @@ on('GET', '/plans/:id/bus-risk', ([id]) => {
   planOrm(id)
   // по формуле plan_bus_risk (bus_factor.py): часы роли с единственным носителем / без носителя
   const planned = items.filter((i) => i.plan_id === id && i.decision === 'planned')
-  const engineers = ENGINEERS
   const role_holders: Record<string, string[]> = {}
-  for (const e of engineers) role_holders.setdefault(e.role.toLowerCase(), []).push(e.engineer_id)
-  const rows = planned.map((i) => {
-    const task = taskMap().get(i.task_id)
-    if (!task) return null
+  for (const e of ENGINEERS) (role_holders[e.role.toLowerCase()] ??= []).push(e.engineer_id)
+  const tasks = taskMap()
+  const rows = planned.flatMap((i) => {
+    const task = tasks.get(i.task_id)
+    if (!task) return []
     const at_risk: string[] = []
     const holders: Record<string, string[]> = {}
-    for (const role of task.role_hours ?? []) {
-      const hs = role_holders.get(role.toLowerCase()) ?? []
+    for (const role of Object.keys(task.role_hours ?? {})) {
+      const hs = role_holders[role.toLowerCase()] ?? []
       if (hs.length <= 1) {
         at_risk.push(role)
         holders[role] = hs
       }
     }
-    return { task_id: task.task_id, summary: task.summary, sprint_no: i.sprint_no, at_risk_keys: at_risk, holders }
-  }).filter((x): x is NonNullable<typeof x> => x && (x as { at_risk_keys: string[] }).at_risk_keys.length > 0)
-  return { total_at_risk: rows.length, tasks: rows as typeof rows }
+    return at_risk.length ? [{ task_id: task.task_id, summary: task.summary, sprint_no: i.sprint_no, at_risk_keys: at_risk, holders }] : []
+  })
+  return { total_at_risk: rows.length, tasks: rows }
 })
 
-// pin/unpin (016): локальные правки на plan-item; apply-draft allocator нет — визуальный слой
+// pin/unpin (016/020): как бэк — pin закрепляет задачу за спринтом и пересобирает план на той же версии.
+// спека: бэк перегенерирует план planner'ом с учётом pins; мок — перегенерация + наложение закреплений
+// (задача целиком переносится в закреплённый спринт, SP части суммируются в одну строку).
+function rebuildPlanWithPins(planId: string) {
+  const pins = new Map(
+    items.filter((i) => i.plan_id === planId && i.pinned_sprint != null).map((i) => [i.task_id, i.pinned_sprint!]),
+  )
+  const done = new Set(chainFacts(planId).flatMap((f) => f.completed_task_ids))
+  for (const t of TASKS) if (t.status === 'Done') done.add(t.task_id)
+  const child = generatePlan(TASKS.filter((t) => !done.has(t.task_id) && t.status !== 'Done'), ENGINEERS, TEAM_HISTORY, deps())
+  // расхождение с бэком: done_actual-строки (факты) сохраняем, бэк при pin-пересборке их теряет
+  items = items.filter((i) => i.plan_id !== planId || i.decision === 'done_actual')
+  storePlan(planId, child)
+  for (const [tid, sprint] of [...pins].sort(([a], [b]) => a.localeCompare(b))) {
+    const rows = items.filter((i) => i.plan_id === planId && i.task_id === tid && i.decision === 'planned')
+    if (!rows.length) continue
+    const [first, ...rest] = rows
+    for (const r of rest) items.splice(items.indexOf(r), 1)
+    first.sprint_no = sprint
+    first.planned_sp = rows.reduce((a, r) => a + (r.planned_sp ?? 0), 0)
+    first.reason = `закреплено за спринтом ${sprint} (pin)`
+    first.pinned_sprint = sprint
+  }
+}
+
 on('POST', '/plans/:id/tasks/:tid/pin', ([id, tid], body) => {
   planOrm(id)
   const sprint = (body as { sprint_no?: number } | undefined)?.sprint_no
   if (typeof sprint !== 'number' || sprint < 1 || sprint > 6) throw new ApiError(422, 'sprint_no обязателен (1..6)')
   const rows = items.filter((i) => i.plan_id === id && i.task_id === tid)
   if (!rows.length) throw new ApiError(404, 'задача не в плане')
+  // 409 как у бэка: зависимость от закреплённого блокера в том же/более позднем спринте
+  const pinnedOf = new Map(
+    items.filter((i) => i.plan_id === id && i.pinned_sprint != null && i.task_id !== tid).map((i) => [i.task_id, i.pinned_sprint!]),
+  )
+  for (const [a, b] of deps()) {
+    if (b !== tid) continue
+    const bs = pinnedOf.get(a)
+    if (bs && bs >= sprint) throw new ApiError(409, `Конфликт закрепления: задача ${tid} зависит от ${a}, которая закреплена на спринт ${bs} >= ${sprint}`)
+  }
   for (const r of rows) r.pinned_sprint = sprint
-  return { status: 'pinned' }
+  rebuildPlanWithPins(id)
+  return { status: 'pinned', plan_id: id, task_id: tid, sprint_no: sprint }
 })
 on('DELETE', '/plans/:id/tasks/:tid/pin', ([id, tid]) => {
   planOrm(id)
   const rows = items.filter((i) => i.plan_id === id && i.task_id === tid)
   if (!rows.length) throw new ApiError(404, 'задача не в плане')
   for (const r of rows) r.pinned_sprint = null
-  return { status: 'unpinned' }
+  rebuildPlanWithPins(id)
+  return { status: 'unpinned', plan_id: id, task_id: tid }
 })
 on('GET', '/plans/:id/diff', ([id]) => {
   planOrm(id)

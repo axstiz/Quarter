@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ErrorAlert } from '@/components/ui/States'
 import type { PlanBusRisk } from '@/api/types'
 
 const PREVIEW = 6
 
 /** Роль → единственный носитель → задачи под угрозой. Самые «широкие» риски сверху, длинные списки свёрнуты.
- *  Источник — ручка GET /plans/{id}/bus-risk (change 003/015, клиент не считает). */
-export function RiskPanelContent({ planRisk, onSelect }: { planRisk: PlanBusRisk | null | undefined; onSelect: (taskId: string) => void }) {
+ *  Источник — ручка GET /plans/{id}/bus-risk (change 003/015, клиент не считает). Ошибка ручки — ошибка в панели, не «0 рисков». */
+export function RiskPanelContent({ planRisk, error, onRetry, onSelect }: { planRisk: PlanBusRisk | null | undefined; error?: unknown; onRetry?: () => void; onSelect: (taskId: string) => void }) {
+  if (error) return <ErrorAlert error={error} onRetry={onRetry} />
   // byRole: роль → { holders: [...], tasks: [...] }
   const byRole = new Map<string, { holders: string[]; tasks: string[] }>()
   for (const t of planRisk?.tasks ?? [])

@@ -15,6 +15,9 @@ export interface PlanTask {
   planned_in_sprint: boolean
   team_id: string
   role_hours: Record<string, number>
+  /** pin (016): закрепление задачи за спринтом/носителем — сервер пересобирает план */
+  pinned_sprint?: number | null
+  pinned_engineer_id?: string | null
 }
 
 export interface Explanation {
