@@ -1,9 +1,10 @@
 """Клиент GigaChat (Sber). Отсутствие ключей = деградация (см. спеку onboarding)."""
 from __future__ import annotations
 
+from src.ai.llm import LLMUnavailable
 
-class GigaUnavailable(Exception):
-    """Ключи не заданы или провайдер недоступен — пайплайн идёт в шаблонный режим."""
+# единый класс исключения с llm.py (change 026)
+GigaUnavailable = LLMUnavailable
 
 
 _CLIENT: "GigaChatClient | None" = None

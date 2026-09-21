@@ -892,7 +892,7 @@ async def advice_endpoint(plan_id: str, comment: str | None = None,
     if not plan_orm:
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
     from pydantic import ValidationError
-    from src.ai.gigachat import GigaUnavailable, get_client
+    from src.ai.llm import LLMUnavailable, get_client
     from src.services.metrics import compute_metrics_initiatives
     from src.services.optimization import generate_staffing_suggestions
 
@@ -946,7 +946,7 @@ async def advice_endpoint(plan_id: str, comment: str | None = None,
                 advice = advice[:6]
                 mode = "llm"
                 break
-            except (ValidationError, ValueError, GigaUnavailable) as e:
+            except (ValidationError, ValueError, LLMUnavailable) as e:
                 logger.warning("advisor LLM attempt %s failed: %s", attempt, e)
         else:
             advice = fallback_advice(warnings, optimization_report, staffing, metrics_report, comment)

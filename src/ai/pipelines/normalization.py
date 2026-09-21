@@ -14,7 +14,7 @@ from typing import Any, Literal, TypedDict
 
 from langgraph.graph import StateGraph
 
-from src.ai.gigachat import GigaUnavailable, get_client
+from src.ai.llm import LLMUnavailable, get_client
 from src.ai.ingest import readers
 from src.ai.ingest.mapping import map_row, template_map_column
 from src.ai.schemas import LLMMappingAnswer, Question
@@ -42,10 +42,8 @@ def llm_mapping(headers: list[str]) -> LLMMappingAnswer | None:
     """LLM-сопоставление колонок; None = недоступно/невалидно."""
     try:
         client = get_client()
-        client_token_check = client
     except Exception:
         return None
-    from src.ai.gigachat import GigaChatClient
 
     try:
         raw = None
@@ -53,7 +51,7 @@ def llm_mapping(headers: list[str]) -> LLMMappingAnswer | None:
         for _ in range(2):
             try:
                 raw = client.complete(SYSTEM_PROMPT, user)
-            except GigaUnavailable:
+            except LLMUnavailable:
                 return None
             text = raw.strip()
             if text.startswith("```"):
