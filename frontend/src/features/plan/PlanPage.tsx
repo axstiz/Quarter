@@ -96,8 +96,16 @@ export function PlanPage() {
         setPlanParam(started.plan_id)
         const moves = job.staffing_moves.length
         const modeLabel = started.mode === 'solver' ? 'solver Timefold' : 'эвристика (сайдкар недоступен)'
-        toast.success('План оптимизирован', {
-          description: `Режим: ${modeLabel}.${moves ? ` Переносов людей: ${moves}.` : ''} Открыта новая версия — откат через селектор версий.`,
+        const reason = job.report?.degradation_reason
+        const degraded = started.mode !== 'solver'
+        toast.success(degraded ? 'План построен эвристикой' : 'План оптимизирован', {
+          description: [
+            `Режим: ${modeLabel}.`,
+            degraded && reason && 'solver не уложился в бюджет — можно перезапустить.',
+            reason ? `Причина: ${reason}.` : '',
+            moves ? ` Переносов людей: ${moves}.` : '',
+            ' Открыта новая версия — откат через селектор версий.',
+          ].filter(Boolean).join(' '),
         })
       },
       onError: (e) => {

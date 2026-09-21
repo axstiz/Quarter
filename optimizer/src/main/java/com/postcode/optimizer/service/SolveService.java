@@ -51,8 +51,10 @@ public class SolveService {
                 .withConstraintProviderClass(OptimizationConstraintProvider.class)
                 .withRandomSeed(config.seed())
                 .withTerminationSpentLimit(Duration.ofSeconds(config.timeLimitSeconds()))
+                // change 029: unimproved-лимит конфигурабелен (default min(timeLimit, 30)) —
+                // зашитые 5 с обрывали фазу восстановления до достижимости hard=0
                 .withTerminationUnimprovedSpentLimit(
-                        Duration.ofSeconds(Math.min(config.timeLimitSeconds(), 5)));
+                        Duration.ofSeconds(config.unimprovedLimitSeconds()));
         this.solverFactory = SolverFactory.create(solverConfig);
         this.solutionManager = SolutionManager.create(solverFactory);
         this.verifier = ConstraintVerifier.build(

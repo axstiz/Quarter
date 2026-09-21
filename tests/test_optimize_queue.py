@@ -138,3 +138,81 @@ async def test_repair_dependencies_shifts_blocked_parts():
     draft2 = repair_dependencies(draft2, deps=[("B", "C")])
     assert all(it["task_id"] != "C" for it in draft2["items"])
     assert draft2["partial_hh"]["C"] == 8.0
+
+
+# --- change 029: solver infeasible → эвристика с reason ---------------------
+
+@pytest.mark.asyncio
+async def test_optimize_infeasible_solver_degrades_to_heuristic(auths, monkeypatch):
+    """score.hard != 0 → SolverUnavailable → эвристика (не 422), reason в отчёте."""
+    from src.db.session import SessionLocal
+    from tests.test_optimize_jobs import _seed_world, _generate_plan
+
+    async def _infeasible(snapshot):
+        return {
+            "assignments": [], "staffing_moves": [],
+            "score": {"hard": 3, "soft": 500},  # solver честно «не успел»
+            "score_breakdown": [],
+            "solve_time_ms": 180000,
+        }
+
+    async with SessionLocal() as session:
+        # change 029: в тестах redis_url указывает на живой Redis — get_queue вернёт
+        # боевой пул; заставим solve сразу подняться без HTTP
+        await _seed_world(session)
+    monkeypatch.setattr("src.services.optimize_plan.solve_sidecar", _infeasible)
+
+    from src.ai import jobs_worker
+
+    class _NoQueue:
+        async def enqueue_job(self, *a, **k):
+            raise RuntimeError("нет очереди в тесте")
+
+    monkeypatch.setattr(jobs_worker, "get_queue", _no_queue_factory())
+    auth = auths["editor"]
+    plan_id = await _generate_plan(auth)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.post("/api/v1/plans/optimize", headers=auth, json={"plan_id": plan_id})
+        assert r.status_code == 200, r.text
+        job = r.json()
+        assert job["status"] == "ready", r.text
+        assert job["mode"] == "heuristic", job
+        jr = await ac.get(f"/api/v1/plans/optimize/{job['job_id']}", headers=auth)
+        jdata = jr.json()
+        assert "не достиг выполнимости" in (jdata["report"].get("degradation_reason") or "")
+
+
+def _no_queue_factory():
+    async def _get():
+        return None
+
+    return _get
+
+
+@pytest.mark.asyncio
+async def test_optimize_http_timeout_degrades_to_heuristic(auths, monkeypatch):
+    """Таймаут HTTP к сайдкару → SolverUnavailable → эвристика с reason."""
+    import httpx
+    from src.db.session import SessionLocal
+    from src.services.optimizer_client import SolverUnavailable
+    from tests.test_optimize_jobs import _seed_world, _generate_plan
+
+    async def _timeout(snapshot):
+        raise SolverUnavailable("solve HTTP timeout: httpx.ReadTimeout(...)")
+
+    async with SessionLocal() as session:
+        await _seed_world(session)
+    monkeypatch.setattr("src.services.optimize_plan.solve_sidecar", _timeout)
+
+    from src.ai import jobs_worker
+    monkeypatch.setattr(jobs_worker, "get_queue", _no_queue_factory())
+    auth = auths["editor"]
+    plan_id = await _generate_plan(auth)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.post("/api/v1/plans/optimize", headers=auth, json={"plan_id": plan_id})
+        assert r.status_code == 200, r.text
+        job = r.json()
+        assert job["mode"] == "heuristic"
+        jr = await ac.get(f"/api/v1/plans/optimize/{job['job_id']}", headers=auth)
+        jdata = jr.json()
+        assert "недоступен/неуспешен" in (jdata["report"].get("degradation_reason") or "")

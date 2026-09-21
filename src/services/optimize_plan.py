@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 
+from src.core.config import settings
 from sqlalchemy import select
 
 from src.db.models import PlanItemORM, PlanORM, SprintFactORM, StaffingMoveORM
@@ -553,21 +554,28 @@ async def run_optimization(session, workspace_id: str, plan_id: str, author_id: 
     snapshot = build_snapshot(tasks_map, engineers, history, deps,
                               done_ids=done_ids, first_free_sprint=first_free)
 
+    degradation_reason: str | None = None
     try:
         response = await solve_sidecar(snapshot)
+        # change 029: честная оценка выполнимости (score.hard уже в ответе Java) —
+        # solver, не достигший hard=0 за бюджет, означает переход в эвристику,
+        # а не 422: пользователь получает план с объяснением
+        hard = (response.get("score") or {}).get("hard") or 0
+        if hard != 0:
+            budget = settings.optimizer_solve_timeout_sec
+            raise SolverUnavailable(
+                f"solver не достиг выполнимости за бюджет ({round(budget, 0)} с)")
         draft = _normalize_draft(response, snapshot, tasks_map, mode="solver")
     except SolverUnavailable as e:
+        degradation_reason = f"solver недоступен/неуспешен: {e}"
         logger.warning("оптимизация без solver (%s): режим эвристики", e)
         draft = _heuristic_draft(tasks_map, engineers, history, deps,
                                  done_ids=done_ids, first_free_sprint=first_free)
 
     if draft["mode"] == "solver":
-        # repair зависимостей (change 028): Timefold при локальном поиске иногда
-        # завершает с комбинациями частей, где зависимая стартует в спринте
-        # блокера — вместо отказа сдвигаем зависимые части за конец блокера
-        # (семантика сдвига как в replanning); остаток за пределами квартала —
-        # честное «выполнится частично» (частично → allocate_engineers)
-        draft = repair_dependencies(draft, deps)
+        # repair зависимостей (change 028): страховочный слой для гэпа
+        # «Java hard=0, Python нашёл нарушение» — сдвиг зависимых частей за
+        # конец блокера (семантика replanning); за спринт 6 — «выполнится частично»
         draft = repair_dependencies(draft, deps)
         # макро-гейты на черновик solver ДО распределения: нарушение → 422 (change 018)
         violations = validate_draft(draft, tasks_map, engineers, history, deps)
@@ -590,6 +598,8 @@ async def run_optimization(session, workspace_id: str, plan_id: str, author_id: 
         session, workspace_id, plan_id, new_orm.plan_id, draft["mode"],
         draft.get("staffing_moves", []), draft.get("score_breakdown", []),
     )
+    if degradation_reason:
+        report["degradation_reason"] = degradation_reason
     return {
         "plan_id": new_orm.plan_id,
         "mode": draft["mode"],

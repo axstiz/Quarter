@@ -106,6 +106,7 @@ export interface OptimizeJob {
     after: Record<string, unknown>
     staffing_moves: StaffingMove[]
     score_breakdown: { constraint: string; weight: number }[]
+    degradation_reason?: string
   } | null
   staffing_moves: StaffingMove[]
   score: { hard: number; soft: number } | null
