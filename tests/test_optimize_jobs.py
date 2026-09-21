@@ -51,9 +51,10 @@ async def _generate_plan(auth) -> str:
 
 
 async def _solver_draft_valid(snapshot: dict) -> dict:
-    """Валидный черновик: по одному #1-части в отдельные спринты (ёмкость 8 SP на спринт)."""
+    """Валидный черновик: размещаем только тестовые T-1/T-2 (в БД может лежать
+    полный dataset из других тестов — те задачи solver как бы не выбрал)."""
     assignments = []
-    for idx, task in enumerate(snapshot["tasks"], start=1):
+    for idx, task in enumerate((t for t in snapshot["tasks"] if t["task_id"] in {"T-1", "T-2"}), start=1):
         assignments.append({
             "part_id": f"{task['task_id']}#1",
             "task_id": task["task_id"],
