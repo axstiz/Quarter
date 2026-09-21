@@ -5,9 +5,10 @@ export interface MockTask extends TaskInfo {
   priority: number
 }
 
-/** Строка plan_items (как в БД бэкенда). */
+/** Строка plan_items (как в БД бэкенда). workspace_id — изоляция по workspace (change 021); отсутствие = default. */
 export interface ItemRow {
   plan_id: string
+  workspace_id?: string
   task_id: string
   team_id: string
   decision: Decision
@@ -21,6 +22,7 @@ export interface ItemRow {
 
 export interface PlanRow {
   plan_id: string
+  workspace_id?: string
   is_initial: boolean
   parent_plan_id: string | null
   recomputed_after_sprint: number | null

@@ -10,6 +10,9 @@ const TeamMapPage = lazy(() => import('@/features/team-map/TeamMapPage').then((m
 const MetricsPage = lazy(() => import('@/features/metrics/MetricsPage').then((m) => ({ default: m.MetricsPage })))
 const ImportPage = lazy(() => import('@/features/import/ImportPage').then((m) => ({ default: m.ImportPage })))
 const LoginPage = lazy(() => import('@/features/auth/LoginPage').then((m) => ({ default: m.LoginPage })))
+const WorkspaceSelectPage = lazy(() => import('@/features/workspace/WorkspaceSelectPage').then((m) => ({ default: m.WorkspaceSelectPage })))
+const PeoplePage = lazy(() => import('@/features/workspace/PeoplePage').then((m) => ({ default: m.PeoplePage })))
+const PermissionsPage = lazy(() => import('@/features/workspace/PermissionsPage').then((m) => ({ default: m.PermissionsPage })))
 
 const page = (el: ReactNode) => (
   <Suspense
@@ -29,13 +32,17 @@ export const router = createBrowserRouter([
   {
     element: <Layout />,
     children: [
-      { index: true, element: <Navigate to="/plan" replace /> },
+      // онбординг (021): первый экран — выбор рабочего пространства, всегда
+      { index: true, element: <Navigate to="/workspaces" replace /> },
+      { path: '/workspaces', element: page(<WorkspaceSelectPage />) },
+      { path: '/workspace/people', element: page(<PeoplePage />) },
+      { path: '/permissions', element: page(<PermissionsPage />) },
       { path: '/plan', element: page(<PlanPage />) },
       { path: '/sprint', element: page(<SprintFactPage />) },
       { path: '/team-map', element: page(<TeamMapPage />) },
       { path: '/metrics', element: page(<MetricsPage />) },
       { path: '/import', element: page(<ImportPage />) },
-      { path: '*', element: <Navigate to="/plan" replace /> },
+      { path: '*', element: <Navigate to="/workspaces" replace /> },
     ],
   },
 ])

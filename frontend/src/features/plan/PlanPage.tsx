@@ -1,8 +1,11 @@
-import { CalendarRange, RotateCcw, ShieldAlert, Sparkles, Upload } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { CalendarRange, Lightbulb, RotateCcw, ShieldAlert, Sparkles, Upload } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { canEdit, getRole } from '@/api/auth'
+import { ApiError } from '@/api/client'
+import { api } from '@/api/endpoints'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useBusFactor, useCurrentPlanId, useFacts, useGeneratePlan, useOptimizePlan, usePlan, usePlanBusRisk, usePlanVersions, useTasks } from '@/api/queries'
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber'
 import { Button } from '@/components/ui/Button'
@@ -18,6 +21,7 @@ import { RiskPanelContent } from './RiskPanel'
 import { GanttView } from './GanttView'
 import { RolesView } from './RolesView'
 import { TaskPanelContent } from './TaskPanel'
+import { AdvicePanelContent } from './AdvicePanel'
 import { Panel } from '@/components/ui/Panel'
 
 export function PlanPage() {
@@ -30,12 +34,31 @@ export function PlanPage() {
   const planRisk = usePlanBusRisk(planId)
   const generate = useGeneratePlan()
   const optimize = useOptimizePlan(planId ?? '')
+  const qc = useQueryClient()
   const [confirmGenerate, setConfirmGenerate] = useState(false)
+  const demoImport = useMutation({
+    mutationFn: api.importDemo,
+    onSuccess: (r) => {
+      qc.invalidateQueries()
+      toast.success('Демо-датасет импортирован', { description: `Записей: ${Object.values(r.counts).join(' · ')}. Постройте план.` })
+    },
+    onError: (e) => toast.error(errorTitle(e), { description: errorHint(e) }),
+  })
 
   const [view] = useParam('view')
   const [taskId, setTaskId] = useParam('task')
   const [riskPanel, setRiskPanel] = useParam('risks')
+  const [advicePanel, setAdvicePanel] = useParam('advice')
   const [, setPlanParam] = useParam('plan')
+
+  // 021 §3.2: чужой/недоступный план (?plan= чужого workspace) — тост и сброс ссылки, без переброса
+  useEffect(() => {
+    const err = plan.error
+    if (err instanceof ApiError && (err.status === 403 || err.status === 404)) {
+      toast.error(errorTitle(err), { description: `${errorHint(err)} — ссылка на чужую версию сброшена; выберите пространство на экране «Сменить пространство».` })
+      setPlanParam(null)
+    }
+  }, [plan.error, setPlanParam])
 
   const model = useMemo(() => (plan.data ? buildPlanModel(plan.data, tasks.data ?? []) : null), [plan.data, tasks.data])
   const fixedSprints = useMemo(() => new Set(facts.data?.map((f) => f.sprint_no)), [facts.data])
@@ -81,11 +104,16 @@ export function PlanPage() {
             <>
               {canEdit(getRole()) && (
                 <Link to="/import" className="btn btn--secondary" style={{ textDecoration: 'none' }}>
-                  <Upload aria-hidden /> <span className="btn__label">Загрузить данные</span>
+                  <Upload aria-hidden /> <span className="btn__label">Загрузить файл</span>
                 </Link>
               )}
               {canEdit(getRole()) && (
-                <Button variant="primary" loading={generate.isPending} onClick={runGenerate}>
+                <Button variant="primary" loading={demoImport.isPending} onClick={() => demoImport.mutate()}>
+                  Импортировать демо-датасет
+                </Button>
+              )}
+              {canEdit(getRole()) && (
+                <Button variant="ghost" loading={generate.isPending} onClick={runGenerate}>
                   Построить план
                 </Button>
               )}
@@ -108,17 +136,19 @@ export function PlanPage() {
   const partialCount = inPlan.filter(isPartial).length
   const spLeft = inPlan.reduce((a, t) => a + t.plannedSp, 0)
   const current = view ?? 'sprints'
-  const panelKey = taskId ? `task:${taskId}` : riskPanel === '1' ? 'risks' : null
+  const panelKey = taskId ? `task:${taskId}` : riskPanel === '1' ? 'risks' : advicePanel === '1' ? 'advice' : null
   // Сетки спринтов при сжатии теряют читаемость (ключи обрезаются) — на них панель ложится поверх
   const overlay = current === 'sprints' || current === 'roles'
 
   const openTask = (id: string) => {
     setRiskPanel(null)
+    setAdvicePanel(null)
     setTaskId(id)
   }
   const closePanel = () => {
     setTaskId(null)
     setRiskPanel(null)
+    setAdvicePanel(null)
   }
 
   return (
@@ -130,6 +160,9 @@ export function PlanPage() {
             <div className="page-head__sub">{plan.data ? `${versionLabel(plan.data)} · 6 спринтов по 2 недели` : 'Загрузка…'}</div>
           </div>
           <div className="page-head__actions">
+            <Button variant="ghost" icon={<Lightbulb />} onClick={() => { setTaskId(null); setRiskPanel(null); setAdvicePanel('1') }}>
+              Советы
+            </Button>
             <Button variant="primary" icon={<Sparkles />} loading={optimize.isPending} disabled={readOnly} onClick={runOptimize}>
               Оптимизировать
             </Button>
@@ -201,11 +234,12 @@ export function PlanPage() {
         overlay={overlay}
         contentKey={plan.data ? panelKey : null}
         onClose={closePanel}
-        eyebrow={taskId ?? 'Bus Factor'}
-        title={taskId ? (model?.tasks.get(taskId)?.summary ?? tasks.data?.find((t) => t.task_id === taskId)?.summary ?? taskId) : 'Задачи под угрозой'}
+        eyebrow={taskId ?? (advicePanel === '1' ? 'AI-советник' : 'Bus Factor')}
+        title={taskId ? (model?.tasks.get(taskId)?.summary ?? tasks.data?.find((t) => t.task_id === taskId)?.summary ?? taskId) : advicePanel === '1' ? 'Советы по плану' : 'Задачи под угрозой'}
       >
         {model && plan.data && taskId && <TaskPanelContent model={model} planId={plan.data.plan_id} taskId={taskId} tasksInfo={tasks.data ?? []} busFactor={bus.data} readOnly={readOnly} onSelect={openTask} />}
         {plan.data && !taskId && riskPanel === '1' && <RiskPanelContent planRisk={planRisk.data} error={planRisk.error} onRetry={() => planRisk.refetch()} onSelect={openTask} />}
+        {plan.data && !taskId && advicePanel === '1' && <AdvicePanelContent planId={plan.data.plan_id} />}
       </Panel>
 
       <ConfirmDialog

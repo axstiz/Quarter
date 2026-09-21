@@ -109,6 +109,14 @@ export function ImportPage() {
             </div>
           ) : !data ? (
             <div style={{ display: 'grid', gap: 'var(--s-4)' }}>
+              {/* 021 §3.1: импорт идёт в текущий workspace — явно проговариваем последствия */}
+              <div className="callout" data-tone="plan" role="note">
+                <div className="callout__title">Импорт в текущее рабочее пространство</div>
+                <p style={{ margin: 0 }}>
+                  Импортированные записи будут обновлены; ручные правки (source=manual) останутся.
+                  После импорта постройте план заново, чтобы он учитывал новые данные.
+                </p>
+              </div>
               <div className="block demo-import">
                 <div>
                   <h2>Датасет организаторов</h2>
@@ -280,6 +288,13 @@ function Done({ result, onRestart }: { result: ConfirmResponse; onRestart: () =>
         <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <CheckCircle2 aria-hidden style={{ width: 18, height: 18, color: 'var(--done)' }} /> Данные загружены
         </h2>
+      </div>
+      {/* 021 §3.1: human-in-loop баннер после изменения данных */}
+      <div className="callout" data-tone="shift" style={{ margin: 'var(--s-3) var(--s-5) 0' }} role="status">
+        <div className="callout__title">Данные изменились — постройте план заново</div>
+        <p style={{ margin: 0 }}>
+          Существующие версии плана остались в истории и не учитывают новые данные. Постройте новую версию по обновлённому датасету.
+        </p>
       </div>
       <div className="block__body" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--s-6)' }}>
         {Object.entries(result.counts).map(([k, n]) => (
