@@ -21,7 +21,7 @@ async def test_advice_endpoint_not_empty(auth):
         assert body["mode"] in ("fallback", "llm")
         assert body["advice"], "советы не пустые"
         kinds = {a["kind"] for a in body["advice"]}
-        assert kinds <= {"task_move", "staffing_shift", "initiative_rescue", "sprint_priority"}
+        assert kinds <= {"task_move", "staffing_shift", "initiative_rescue", "sprint_priority", "hiring"}
         for a in body["advice"]:
             assert a["numeric_basis"]
             assert a["expected_effect"]
@@ -136,3 +136,52 @@ async def test_advice_saved_to_history_with_comment(auth):
         assert "версия" in top["version_label"]
         assert top["mode"] in ("llm", "fallback")
         assert isinstance(top["advice"], list)
+
+
+def test_role_deficit_by_sprint_detects_shortage():
+    """change 055: дефицит роли считается как требуемые часы минус лимит носителей."""
+    from src.ai.pipelines.advisor import role_deficit_by_sprint
+    from src.domain.models import Assignment, Engineer, Plan, PlanItem, PlanDecision, SprintPlan
+
+    engineers = [Engineer(engineer_id="E-1", team_id="Team-A", role="Тестировщик", capacity_rate=1.0)]
+    plan = Plan(plan_id="p", sprints=[SprintPlan(sprint_no=1, items=[
+        PlanItem(task_id="T-1", decision=PlanDecision.planned, sprint_no=1,
+                 assignments=[Assignment(task_id="T-1", role="Тестировщик", engineer_id="E-1", sprint_no=1, hours=100.0)]),
+    ])])
+    deficit = role_deficit_by_sprint(plan, engineers)
+    assert deficit == [{"sprint": 1, "role": "Тестировщик", "deficit_hours": 20.0, "hires": 1}]
+
+
+def test_role_deficit_no_shortage_when_capacity_covers():
+    from src.ai.pipelines.advisor import role_deficit_by_sprint
+    from src.domain.models import Assignment, Engineer, Plan, PlanItem, PlanDecision, SprintPlan
+
+    engineers = [Engineer(engineer_id="E-1", team_id="Team-A", role="Тестировщик", capacity_rate=1.0)]
+    plan = Plan(plan_id="p", sprints=[SprintPlan(sprint_no=1, items=[
+        PlanItem(task_id="T-1", decision=PlanDecision.planned, sprint_no=1,
+                 assignments=[Assignment(task_id="T-1", role="Тестировщик", engineer_id="E-1", sprint_no=1, hours=80.0)]),
+    ])])
+    assert role_deficit_by_sprint(plan, engineers) == []
+
+
+def test_fallback_hiring_advice_on_question():
+    """change 055: fallback отвечает на «кого нанять» наймом из дефицита — первым советом."""
+    out = fallback_advice([], {}, [], {}, comment="кого мне надо нанять до 1го спринта?",
+                          role_deficit=[{"sprint": 1, "role": "Тестировщик", "deficit_hours": 100.0, "hires": 2}])
+    assert out and out[0].kind == "hiring"
+    assert "Тестировщик" in out[0].message and "2 ст." in out[0].message
+    assert out[0].affected_roles == ["Тестировщик"]
+
+
+def test_fallback_hiring_honest_no_deficit():
+    """change 055: дефицита нет — честный ответ «нанимать не требуется»."""
+    out = fallback_advice([], {}, [], {}, comment="кого нанять до спринта 2?", role_deficit=[])
+    assert out and out[0].kind == "hiring"
+    assert "не требуется" in out[0].message
+
+
+def test_advice_item_accepts_hiring_kind():
+    from src.ai.pipelines.advisor import AdviceItem
+    item = AdviceItem(kind="hiring", affected_roles=["Тестировщик"], message="m",
+                      numeric_basis="n", expected_effect="e")
+    assert item.kind == "hiring"

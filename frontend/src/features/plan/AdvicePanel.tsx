@@ -13,7 +13,8 @@ const KIND_LABEL: Record<string, { label: string; tone: 'plan' | 'shift' | 'over
   task_move: { label: 'Перенос задачи', tone: 'shift' },
   staffing_shift: { label: 'Кадровый сдвиг', tone: 'plan' },
   initiative_rescue: { label: 'Спасение инициативы', tone: 'over' },
-  sprint_priority: { label: 'Приоритеты спринта', tone: 'done' },
+   sprint_priority: { label: 'Приоритеты спринта', tone: 'done' },
+   hiring: { label: 'Найм', tone: 'over' },
 }
 
 /**
@@ -98,6 +99,7 @@ export function AdvicePanelContent({ planId }: { planId: string }) {
                   <Badge tone={kind.tone}>{kind.label}</Badge>
                   {a.affected_task_ids.length > 0 && <span className="mono" style={{ fontSize: 'var(--text-xs)' }}>{a.affected_task_ids.join(', ')}</span>}
                   {a.affected_engineers.length > 0 && <span className="mono" style={{ fontSize: 'var(--text-xs)' }}>люди: {a.affected_engineers.join(', ')}</span>}
+                  {(a.affected_roles?.length ?? 0) > 0 && <span className="mono" style={{ fontSize: 'var(--text-xs)' }}>роли: {a.affected_roles!.join(', ')}</span>}
                 </div>
                 <p style={{ margin: 0 }}>{a.message}</p>
                 <dl className="advice-facts" style={{ margin: 0, display: 'grid', gap: 4, fontSize: 'var(--text-xs)' }}>

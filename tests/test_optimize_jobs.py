@@ -186,7 +186,9 @@ async def test_optimize_job_404_foreign_and_missing(auths, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_optimize_invalid_draft_422_no_version(auths, monkeypatch):
+async def test_optimize_invalid_draft_degrades_to_heuristic(auths, monkeypatch):
+    """change 056: невалидный черновик solver — не 422, а деградация в эвристику:
+    optimize отрабатывает всегда, причина — в отчёте (degradation_reason)."""
     from src.db.session import SessionLocal
     async with SessionLocal() as session:
         await _seed_world(session)
@@ -195,16 +197,16 @@ async def test_optimize_invalid_draft_422_no_version(auths, monkeypatch):
     plan_id = await _generate_plan(auth)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         r = await ac.post("/api/v1/plans/optimize", headers=auth, json={"plan_id": plan_id})
-        assert r.status_code == 422, r.text
-        detail = r.json()["detail"]
-        assert "валидаци" in detail["error"]
+        assert r.status_code == 200, r.text
+        job = r.json()
+        assert job["status"] == "ready"
+        assert job["mode"] == "heuristic"
+        assert job["plan_id"] and job["plan_id"] != plan_id
 
-        history = await ac.get("/api/v1/plans", headers=auth)
-        assert not any(v.get("parent_plan_id") == plan_id for v in history.json())  # версия не создана
-
-        jobs = (await ac.get(f"/api/v1/plans/optimize/{detail['job_id']}", headers=auth)).json()
-        assert jobs["status"] == "failed"
-        assert "валидаци" in (jobs.get("error") or "")
+        jdata = (await ac.get(f"/api/v1/plans/optimize/{job['job_id']}", headers=auth)).json()
+        assert jdata["status"] == "ready"
+        report = jdata.get("report") or {}
+        assert "валидаци" in (report.get("degradation_reason") or ""), report.get("degradation_reason")
 
 
 @pytest.mark.asyncio

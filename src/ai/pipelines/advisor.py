@@ -19,9 +19,10 @@ _FACTS_CAP = 12_000
 
 
 class AdviceItem(BaseModel):
-    kind: str = Field(pattern="^(task_move|staffing_shift|initiative_rescue|sprint_priority)$")
+    kind: str = Field(pattern="^(task_move|staffing_shift|initiative_rescue|sprint_priority|hiring)$")
     affected_task_ids: list[str] = []
     affected_engineers: list[str] = []
+    affected_roles: list[str] = []  # change 055: hiring — какие роли нанимать
     message: str
     numeric_basis: str
     expected_effect: str
@@ -33,10 +34,49 @@ class AdviceReport(BaseModel):
     advice: list[AdviceItem] = []
 
 
+# --- дефицит ролей по спринтам (change 055): ответ на «кого нанять» ----------
+
+def role_deficit_by_sprint(plan, engineers: list) -> list[dict]:
+    """Требуемые часы роли (assignments плана) минус суммарный лимит её носителей
+    в компании (80×ставка); дефицит → ставок к найму (⌈часы/80⌉). Все 6 спринтов —
+    LLM сам выбирает горизонт по вопросу пользователя."""
+    import math
+    from collections import defaultdict
+
+    from src.services.planner import _rl
+
+    required: dict[int, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    role_display: dict[str, str] = {}
+    for s in plan.sprints:
+        for item in s.items:
+            if item.decision.value != "planned":
+                continue
+            for a in item.assignments:
+                required[s.sprint_no][_rl(a.role)] += a.hours
+                role_display.setdefault(_rl(a.role), a.role)
+    available: dict[str, float] = defaultdict(float)
+    for e in engineers:
+        available[_rl(e.role)] += 80.0 * min(float(e.capacity_rate or 1.0), 1.0)
+        role_display.setdefault(_rl(e.role), e.role)
+    out: list[dict] = []
+    for sprint in sorted(required):
+        for norm, hours in required[sprint].items():
+            deficit = round(hours - available.get(norm, 0.0), 2)
+            if deficit > 0.05:
+                out.append({
+                    "sprint": sprint,
+                    "role": role_display.get(norm, norm),
+                    "deficit_hours": deficit,
+                    "hires": math.ceil(deficit / 80.0),
+                })
+    return out
+
+
 # --- facts-JSON: компактная сводка состояния плана -------------------------
 
 def facts_json(warnings: list[dict], metrics: dict, optimization_report: dict,
-               staffing: list[dict], comment: str | None) -> dict:
+               staffing: list[dict], comment: str | None,
+               role_deficit: list[dict] | None = None) -> dict:
     facts = {
         "sprints_total": SPRINTS_PER_QUARTER,
         "quarter": {
@@ -61,6 +101,8 @@ def facts_json(warnings: list[dict], metrics: dict, optimization_report: dict,
             if isinstance(optimization_report.get("kpi_summary"), dict) else {},
         },
         "staffing_suggestions": (staffing or [])[:4],
+        # change 055: дефицит ролей по спринтам — данные для ответа «кого нанять»
+        "role_deficit_by_sprint": (role_deficit or [])[:18],
     }
     if comment:
         facts["user_comment"] = comment.strip()[:MAX_COMMENT]
@@ -80,14 +122,19 @@ def _drop_none(obj):
 _SYSTEM = (
     "Ты — советник руководителя по квартальному планированию команд разработки. "
     "Тебе дают компактную сводку состояния плана (факты спринтов, риски, KPI с нормами, "
-    "оптимизационный отчёт и кадровые предложения). Числа и ограничения уже посчитаны ядром "
+    "оптимизационный отчёт, кадровые предложения и дефицит ролей по спринтам). "
+    "Числа и ограничения уже посчитаны ядром "
     "сервиса — НИКАКИХ новых вычислений не выполняй. Верни ТОЛЬКО JSON-массив советов, "
     "каждый совет: "
-    '{"kind": "task_move|staffing_shift|initiative_rescue|sprint_priority", '
-    '"affected_task_ids": [..], "affected_engineers": [..], '
+    '{"kind": "task_move|staffing_shift|initiative_rescue|sprint_priority|hiring", '
+    '"affected_task_ids": [..], "affected_engineers": [..], "affected_roles": [..], '
     '"message": "что сделать по-человечески", '
     '"numeric_basis": "на каких числах основан", '
     '"expected_effect": "какой эффект на метрики"}. '
+    "Если user_comment содержит вопрос — ПЕРВЫЙ совет обязан отвечать именно на него. "
+    "На вопрос о найме («кого нанять», «кого нанять до спринта N») отвечай kind=hiring "
+    "на основе role_deficit_by_sprint: назови роли и число ставок (hires) к нужному спринту; "
+    "если дефицита нет — честно скажи, что нанимать не требуется. "
     "Не предлагай действия для закреплённых задач (они не входят в сводку переносов). "
     "Совет одноразовый: весь контекст — в указанном комментарии."
 )
@@ -135,8 +182,38 @@ def _extract_json(text: str) -> list[dict]:
 
 def fallback_advice(warnings: list[dict], optimization_report: dict,
                     staffing_suggestions: list[dict], metrics: dict,
-                    comment: str | None) -> list[AdviceItem]:
+                    comment: str | None, role_deficit: list[dict] | None = None) -> list[AdviceItem]:
     out: list[AdviceItem] = []
+
+    # change 055: найм — из дефицита ролей; при вопросе «кого нанять» — первым советом
+    deficits = role_deficit or []
+    hiring_question = bool(comment) and any(
+        w in comment.lower() for w in ("нанять", "найм", "нанима", "кого взять", "подбор"))
+    if deficits:
+        first_sprint = min(d["sprint"] for d in deficits)
+        early = [d for d in deficits if d["sprint"] <= first_sprint + 1][:4]
+        roles_txt = ", ".join(f"{d['role']} — {d['hires']} ст. (спринт {d['sprint']}, дефицит {round(d['deficit_hours'])} ч)"
+                              for d in early)
+        total_hires = sum(d["hires"] for d in early)
+        hiring_item = AdviceItem(
+            kind="hiring",
+            affected_roles=[d["role"] for d in early],
+            message=f"Нанять до ближайших спринтов: {roles_txt}",
+            numeric_basis=f"дефицит {round(sum(d['deficit_hours'] for d in early))} ч ≈ {total_hires} ставок (80 ч/спринт)",
+            expected_effect="закрытие дефицита ролей без перегруза существующих команд",
+        )
+        if hiring_question:
+            out.append(hiring_item)
+        elif first_sprint == 1:
+            # дефицит уже в первом спринте — показываем и без явного вопроса
+            out.append(hiring_item)
+    if hiring_question and not deficits:
+        out.append(AdviceItem(
+            kind="hiring",
+            message="Дефицита ролей по спринтам нет — нанимать не требуется, спрос закрывается текущими носителями",
+            numeric_basis="требуемые часы ролей ≤ суммарных лимитов носителей во всех спринтах",
+            expected_effect="кадровый план не меняется",
+        ))
 
     for w in warnings:
         if w.get("kind") in ("deadline_overflow", "dependency_shift") and (w.get("task_ids") or []):

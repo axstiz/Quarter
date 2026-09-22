@@ -989,11 +989,13 @@ async def advice_endpoint(plan_id: str, comment: str | None = None,
     staffing = generate_staffing_suggestions(engineers, tasks)
 
     from src.ai.pipelines.advisor import (AdviceReport, fallback_advice, facts_json,
-                                          llm_advice_async)
+                                          llm_advice_async, role_deficit_by_sprint)
 
+    # change 055: дефицит ролей по всем спринтам — данные для ответа «кого нанять»
+    role_deficit = role_deficit_by_sprint(plan, engineers)
     snapshot = facts_json(warnings=warnings, metrics=metrics_report,
                           optimization_report=optimization_report, staffing=staffing,
-                          comment=comment or None)
+                          comment=comment or None, role_deficit=role_deficit)
     # pinned-задачи: в сводку не попадают «переносные» options — фильтр вывода
     advice: list = []
     mode = "fallback"
@@ -1010,9 +1012,11 @@ async def advice_endpoint(plan_id: str, comment: str | None = None,
             except (ValidationError, ValueError, LLMUnavailable) as e:
                 logger.warning("advisor LLM attempt %s failed: %s", attempt, e)
         else:
-            advice = fallback_advice(warnings, optimization_report, staffing, metrics_report, comment)
+            advice = fallback_advice(warnings, optimization_report, staffing, metrics_report, comment,
+                                     role_deficit=role_deficit)
     else:
-        advice = fallback_advice(warnings, optimization_report, staffing, metrics_report, comment)
+        advice = fallback_advice(warnings, optimization_report, staffing, metrics_report, comment,
+                                     role_deficit=role_deficit)
         advice = [a for a in advice if not (set(a.affected_task_ids) & pinned_ids)]
 
     report = AdviceReport(mode=mode, comment_considered=bool(comment), advice=advice)
@@ -1391,12 +1395,29 @@ async def pin_task(
                 "position": item.pinned_position,
             }
 
+    # change 056: зависимости проверяются против ФАКТИЧЕСКИХ позиций в плане,
+    # а не только закреплённых: блокер должен заканчиваться раньше целевого спринта,
+    # зависимая — начинаться позже; иначе перенос создаст невалидное состояние плана
+    def _sprints_of(tid: str) -> list[int]:
+        return [it.sprint_no for it in items
+                if it.task_id == tid and it.sprint_no is not None
+                and it.decision == PlanDecision.planned.value and it.task_id != task_id]
+
     for b_id in blocking_ids:
-        b_sprint = existing_pins.get(b_id, {}).get("sprint_no")
-        if b_sprint and b_sprint >= body.sprint_no:
+        b_positions = _sprints_of(b_id) or [existing_pins.get(b_id, {}).get("sprint_no")]
+        b_last = max((s for s in b_positions if s), default=None)
+        if b_last and b_last >= body.sprint_no:
             raise HTTPException(
                 status_code=409,
-                detail=f"Конфликт закрепления: задача {task_id} зависит от {b_id}, которая закреплена на спринт {b_sprint} >= {body.sprint_no}",
+                detail=f"задача {task_id} зависит от {b_id}, которая заканчивается в спринте {b_last} — перенос в спринт {body.sprint_no} нарушит зависимость",
+            )
+    for d_id in [b for a, b in deps if a == task_id]:
+        d_positions = _sprints_of(d_id) or [existing_pins.get(d_id, {}).get("sprint_no")]
+        d_first = min((s for s in d_positions if s), default=None)
+        if d_first and d_first <= body.sprint_no:
+            raise HTTPException(
+                status_code=409,
+                detail=f"задача {d_id} зависит от {task_id} и начинается в спринте {d_first} — перенос в спринт {body.sprint_no} нарушит зависимость",
             )
 
     if body.engineer_id:

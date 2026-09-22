@@ -61,7 +61,10 @@ class GigaChatClient:
                 raise GigaUnavailable("GIGACHAT_CLIENT_SECRET не задан")
 
     def complete(self, system: str, user: str, temperature: float = 0.0) -> str:
-        """Возвращает текст ответа; при недоступности кидает GigaUnavailable."""
+        """Возвращает текст ответа; при недоступности кидает GigaUnavailable.
+
+        change 055: до 3 попыток с backoff (1с, 2с) — API GigaChat периодически
+        отвечает 429/5xx/обрывом; одиночный вызов делал советник «мёртвым»."""
         self._ensure()
         payload = {
             # model обязателен у GigaChat API (change 027: default GigaChat)
@@ -73,16 +76,25 @@ class GigaChatClient:
         }
         if temperature:
             payload["temperature"] = temperature
-        try:
-            resp = self._inner.chat(payload)
-        except GigaUnavailable:
-            raise
-        except Exception as e:
-            # change 030: любые ошибки транспорта/верификации/конфигурации SDK
-            # (в т.ч. FileNotFoundError по кривому CA-бандлу) — деградация
-            # GigaUnavailable, а не 500 (наш советник ловит её штатно)
-            raise GigaUnavailable(f"LLM недоступен: {e}") from e
-        return resp.choices[0].message.content
+        import logging
+        import time
+        log = logging.getLogger(__name__)
+        last: Exception | None = None
+        for attempt in (1, 2, 3):
+            try:
+                resp = self._inner.chat(payload)
+                return resp.choices[0].message.content
+            except GigaUnavailable:
+                raise
+            except Exception as e:
+                last = e
+                log.warning("gigachat попытка %s/3 не удалась: %s", attempt, e)
+                if attempt < 3:
+                    time.sleep(float(attempt))
+        # change 030: любые ошибки транспорта/верификации/конфигурации SDK
+        # (в т.ч. FileNotFoundError по кривому CA-бандлу) — деградация
+        # GigaUnavailable, а не 500 (наш советник ловит её штатно)
+        raise GigaUnavailable(f"LLM недоступен после 3 попыток: {last}") from last
 
 
 def get_client() -> GigaChatClient:

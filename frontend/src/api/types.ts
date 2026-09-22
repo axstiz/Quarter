@@ -175,7 +175,7 @@ export interface AuditEntry {
 
 // --- AI-советник (change 015, UI — change 021 §5) ---
 
-export type AdviceKind = 'task_move' | 'staffing_shift' | 'initiative_rescue' | 'sprint_priority'
+  export type AdviceKind = 'task_move' | 'staffing_shift' | 'initiative_rescue' | 'sprint_priority' | 'hiring'
 
 // --- Прогноз bus factor по плановой загрузке (change 023) ---
 
@@ -213,6 +213,7 @@ export interface AdviceItem {
   kind: AdviceKind
   affected_task_ids: string[]
   affected_engineers: string[]
+  affected_roles?: string[]
   message: string
   numeric_basis: string
   expected_effect: string

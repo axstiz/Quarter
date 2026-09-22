@@ -1,7 +1,7 @@
 import { Check, ChevronDown, RotateCcw } from 'lucide-react'
 import { useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { useEngineers, usePinTask, useTeamDetails, useUnpinAllTasks, useUnpinTask } from '@/api/queries'
+import { useEngineers, usePinTask, useTeamDetails, useUnpinAllTasks, useUnpinTask, useDependencies } from '@/api/queries'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { SearchInput, Select } from '@/components/ui/Field'
@@ -121,14 +121,57 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
   /** Отказ сервера помним по части задачи: отказ одной части не блокирует перенос другой. */
   const pinKey = (chip: RoleChip, target: number) => `${chip.taskId}:${chip.sprintNo}:${target}`
 
-  /** Целевой спринт валиден: внутри квартала, не зафиксирован фактом, и сервер его не отклонял (409). */
-  const validTarget = (chip: RoleChip, target: number): boolean =>
-    SPRINT_NUMBERS.includes(target) && !fixedSprints.has(target) && !failedPins.includes(pinKey(chip, target))
+  // change 056: зависимости — жёсткий запрет переноса в спринт, который их нарушит:
+  // блокеры задачи должны заканчиваться раньше цели, зависимые — начинаться позже
+  const depsQuery = useDependencies()
+  const depBounds = useMemo(() => {
+    const blockersOf = new Map<string, string[]>()
+    const blockedOf = new Map<string, string[]>()
+    for (const d of depsQuery.data ?? []) {
+      blockersOf.set(d.blocked_task_id, [...(blockersOf.get(d.blocked_task_id) ?? []), d.blocking_task_id])
+      blockedOf.set(d.blocking_task_id, [...(blockedOf.get(d.blocking_task_id) ?? []), d.blocked_task_id])
+    }
+    const firstSprintOf = (tid: string) => model.tasks.get(tid)?.sprints[0] ?? null
+    const lastSprintOf = (tid: string) => {
+      const ss = model.tasks.get(tid)?.sprints ?? []
+      return ss.length ? ss[ss.length - 1] : null
+    }
+    return (taskId: string): { min: number; max: number; reason: string | null } => {
+      let min = 1
+      let max = SPRINT_NUMBERS[SPRINT_NUMBERS.length - 1]
+      let reason: string | null = null
+      for (const b of blockersOf.get(taskId) ?? []) {
+        const last = lastSprintOf(b)
+        if (last != null && last + 1 > min) {
+          min = last + 1
+          reason = `зависит от ${b}, которая заканчивается в спринте ${last}`
+        }
+      }
+      for (const d of blockedOf.get(taskId) ?? []) {
+        const first = firstSprintOf(d)
+        if (first != null && first - 1 < max) {
+          max = first - 1
+          reason = reason ?? `от неё зависит ${d}, которая начинается в спринте ${first}`
+        }
+      }
+      return { min, max, reason }
+    }
+  }, [depsQuery.data, model])
+
+  /** Целевой спринт валиден: внутри квартала, не зафиксирован фактом, не нарушает
+   *  зависимости (056) и сервер его не отклонял (409). */
+  const validTarget = (chip: RoleChip, target: number): boolean => {
+    if (!SPRINT_NUMBERS.includes(target) || fixedSprints.has(target) || failedPins.includes(pinKey(chip, target))) return false
+    const bounds = depBounds(chip.taskId)
+    return target >= bounds.min && target <= bounds.max
+  }
 
   const invalidReason = (chip: RoleChip, target: number | null): string => {
     if (target == null || !SPRINT_NUMBERS.includes(target)) return 'Вне квартала'
     if (fixedSprints.has(target)) return 'Спринт закрыт по факту'
     if (failedPins.includes(pinKey(chip, target))) return 'сервер отклонил этот перенос, цель заблокирована'
+    const bounds = depBounds(chip.taskId)
+    if (target < bounds.min || target > bounds.max) return bounds.reason ?? 'Нарушит зависимости задач'
     return 'Перенос недоступен'
   }
 

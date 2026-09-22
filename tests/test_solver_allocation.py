@@ -139,3 +139,32 @@ def test_assignment_role_uses_display_name():
                  {"T-1": task}, engineers)
     ass = draft["items"][0]["assignments"]
     assert ass and all(a["role"] == "Тестировщик (Автотестирование)" for a in ass), ass
+
+
+def test_allocate_shift_then_repairs_dependencies():
+    """change 056: сдвиг блокера ступенью 2 каскадно сдвигает зависимую (repair после allocate)."""
+    from src.services.optimize_plan import repair_dependencies
+
+    # блокер T-1 (40 ч, носитель занят на 60) сдвинется в спринт 2; зависимая T-2 стоит в 2
+    tasks = {
+        "T-1": _task("T-1", 5.0, {"Разработчик": 40.0}),
+        "T-2": _task("T-2", 5.0, {"Разработчик": 40.0}),
+    }
+    engineers = _engineers(("E-1", TEAM, "Разработчик", 1.0))
+    items = [
+        _draft_item("T-1", 1, 1, 5.0, {"Разработчик": 40.0}),
+        _draft_item("T-2", 1, 2, 5.0, {"Разработчик": 40.0}),
+    ]
+    # займём носителя в спринте 1 другой задачей, чтобы T-1 сдвинулся в 2
+    items.insert(0, _draft_item("T-0", 1, 1, 5.0, {"Разработчик": 60.0}))
+    tasks["T-0"] = _task("T-0", 5.0, {"Разработчик": 60.0})
+    draft = _run(items, tasks, engineers)
+    sprints = {it["task_id"]: it["sprint_no"] for it in draft["items"]}
+    assert sprints.get("T-1") == 2, sprints
+    # до repair: T-2 стартует в 2, блокер T-1 заканчивается в 2 — нарушение
+    draft = repair_dependencies(draft, [("T-1", "T-2")])
+    sprints = {it["task_id"]: it["sprint_no"] for it in draft["items"]}
+    assert sprints.get("T-2", 99) > sprints["T-1"], f"зависимая не сдвинулась за блокер: {sprints}"
+    for it in draft["items"]:
+        for a in it.get("assignments") or []:
+            assert a["sprint_no"] == it["sprint_no"], "assignments не синхронизированы со сдвигом"

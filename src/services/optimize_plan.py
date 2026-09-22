@@ -448,6 +448,10 @@ def repair_dependencies(draft: dict, deps: list[tuple[str, str]]) -> dict:
                 else:
                     old = it["sprint_no"]
                     it["sprint_no"] = new_sprint
+                    # change 056: после ступени 2 у части есть assignments — их спринт
+                    # тоже сдвигается, иначе часы останутся в старом спринте
+                    for a in (it.get("assignments") or []):
+                        a["sprint_no"] = new_sprint
                     it["note"] = f"сдвиг по зависимости: спринт {old} → {new_sprint}"
             moved = True
         if not moved:
@@ -644,17 +648,33 @@ async def run_optimization(session, workspace_id: str, plan_id: str, author_id: 
         # «Java hard=0, Python нашёл нарушение» — сдвиг зависимых частей за
         # конец блокера (семантика replanning); за спринт 6 — «выполнится частично»
         draft = repair_dependencies(draft, deps)
-        # макро-гейты на черновик solver ДО распределения: нарушение → 422 (change 018)
+        # change 056: нарушения черновика solver — не 422, а деградация в эвристику:
+        # optimize обязан отрабатывать всегда, честная причина — в отчёте
         violations = validate_draft(draft, tasks_map, engineers, history, deps)
         if violations:
-            raise DraftValidationError("; ".join(violations[:5]))
-        # ступень 2 (change 022): закрепление часов за конкретными инженерами,
-        # жадные сдвиги не влезших частей; пер-специалистов невыполнимость → сдвиг
-        draft = allocate_engineers(draft, tasks_map, engineers, history)
-        # пост-валидация: сдвиги не должны сломать структурные правила (зависимости)
-        violations = validate_draft(draft, tasks_map, engineers, history, deps)
-        if violations:
-            raise DraftValidationError("; ".join(violations[:5]))
+            degradation_reason = (
+                f"черновик solver не прошёл валидацию ({'; '.join(violations[:3])}); "
+                "режим эвристики")
+            logger.warning("оптимизация: %s", degradation_reason)
+            draft = _heuristic_draft(tasks_map, engineers, history, deps,
+                                     done_ids=done_ids, first_free_sprint=first_free)
+            draft["mode"] = "heuristic"
+        else:
+            # ступень 2 (change 022): закрепление часов за конкретными инженерами,
+            # жадные сдвиги не влезших частей; пер-специалистов невыполнимость → сдвиг
+            draft = allocate_engineers(draft, tasks_map, engineers, history)
+            # change 056: сдвиги ступени 2 могли нарушить зависимости (блокер уехал
+            # вперёд к зависимой) — каскадный repair ПОСЛЕ распределения, не 422
+            draft = repair_dependencies(draft, deps)
+            violations = validate_draft(draft, tasks_map, engineers, history, deps)
+            if violations:
+                degradation_reason = (
+                    f"черновик solver после распределения по специалистам не прошёл "
+                    f"валидацию ({'; '.join(violations[:3])}); режим эвристики")
+                logger.warning("оптимизация: %s", degradation_reason)
+                draft = _heuristic_draft(tasks_map, engineers, history, deps,
+                                         done_ids=done_ids, first_free_sprint=first_free)
+                draft["mode"] = "heuristic"
 
     if draft["staffing_moves"] and not require_staffing:
         raise StaffingPermissionError("черновик требует переноса людей (право plans_optimize_staffing)")
