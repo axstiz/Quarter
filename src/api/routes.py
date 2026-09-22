@@ -483,7 +483,16 @@ async def _recompute_plan_version(session, plan_id: str, after_sprint: int, work
     child = generate_plan(planner_in, first_free_sprint=first_free, pins=pins or None)
 
     for item in current_items:
-        if item.task_id in done_ids and item.decision == PlanDecision.planned.value:
+        if item.decision == PlanDecision.done_actual.value:
+            # change 059: выполненные по прошлым фактам сохраняются в новой версии —
+            # иначе после факта 2-го спринта теряются done_actual 1-го (Гант/команды)
+            session.add(PlanItemORM(
+                plan_id=new_orm.plan_id, task_id=item.task_id,
+                team_id=item.team_id, decision=PlanDecision.done_actual.value,
+                sprint_no=item.sprint_no, reason=item.reason,
+                planned_sp=item.planned_sp, assignments=item.assignments,
+            ))
+        elif item.task_id in done_ids and item.decision == PlanDecision.planned.value:
             session.add(PlanItemORM(
                 plan_id=new_orm.plan_id, task_id=item.task_id,
                 team_id=item.team_id, decision=PlanDecision.done_actual.value,

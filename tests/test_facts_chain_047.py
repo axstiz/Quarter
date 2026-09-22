@@ -109,3 +109,24 @@ async def test_optimize_keeps_done_actual_items(client, monkeypatch):
     done_items = [i for i in data["not_planned"] if i["task_id"] == done_task]
     assert done_items, f"выполненная задача {done_task} пропала после оптимизации"
     assert all(i["decision"] == "done_actual" for i in done_items)
+
+
+@pytest.mark.asyncio
+async def test_second_fact_keeps_first_sprint_done_items(client):
+    """change 059: после факта 2-го спринта done_actual 1-го не пропадают с ганта."""
+    pid, child_pid, done_task = await _plan_with_fact(client)
+
+    # факт спринта 2 по другой задаче (из спринта 2 дочерней версии)
+    r = await client.get(f"/api/v1/plans/{child_pid}")
+    sprints = r.json()["sprints"]
+    task_s2 = next(t["task_id"] for s in sprints if s["sprint_no"] == 2 for t in s["tasks"])
+    r = await client.post(f"/api/v1/plans/{child_pid}/sprints/2/facts",
+                          json={"completed_sp": 15.0, "completed_task_ids": [task_s2]})
+    assert r.status_code == 200
+    third_pid = r.json()["new_plan_id"]
+
+    r = await client.get(f"/api/v1/plans/{third_pid}")
+    data = r.json()
+    done = {i["task_id"]: i["sprint_no"] for i in data["not_planned"] if i["decision"] == "done_actual"}
+    assert done.get(done_task) == 1, f"done_actual 1-го спринта потерян: {done}"
+    assert done.get(task_s2) == 2, f"done_actual 2-го спринта отсутствует: {done}"
