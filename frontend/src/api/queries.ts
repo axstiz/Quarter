@@ -94,6 +94,26 @@ export function useStarMap() {
   return useQuery({ queryKey: keys.starMap, queryFn: api.getStarMap })
 }
 
+/** change 043: совет — глобальный react-query state per planId (не слетает при переключении вкладок).
+ * Manual refetch по кнопке; кэш и статус запроса переживают размонтирование панели. */
+export function useAdvice(planId: string) {
+  return useQuery({
+    queryKey: ['advice', planId],
+    queryFn: ({ queryKey: [, id] }) => api.getAdvice(id as string),
+    enabled: false,
+    staleTime: Infinity,
+  })
+}
+
+/** change 043: история советов по версии плана. */
+export function useAdviceHistory(planId: string) {
+  return useQuery({
+    queryKey: ['advice-history', planId],
+    queryFn: () => api.getAdviceHistory(planId),
+    staleTime: 15_000,
+  })
+}
+
 export function useBusFactor() {
   return useQuery({ queryKey: keys.busFactor, queryFn: api.getBusFactor })
 }

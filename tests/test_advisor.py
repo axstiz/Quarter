@@ -112,3 +112,27 @@ async def test_bad_ca_bundle_degrades_not_500(monkeypatch):
 
     with pytest.raises(LLMUnavailable, match="LLM недоступен"):
         c.complete("s", "u")
+
+
+@pytest.mark.asyncio
+async def test_advice_saved_to_history_with_comment(auth):
+    """change 043: прогон записывается в историю с комментарием и version_label."""
+    from httpx import ASGITransport, AsyncClient
+    from src.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/api/v1/data/import", headers=auth)
+        plan = (await client.post("/api/v1/plans/generate", json={"strategy": "priority"}, headers=auth)).json()["plan_id"]
+        r = await client.get(f"/api/v1/plans/{plan}/advice?comment=ENG-405 заболел", headers=auth)
+        assert r.status_code == 200, r.text
+
+        h = await client.get(f"/api/v1/plans/{plan}/advice/history", headers=auth)
+        assert h.status_code == 200, h.text
+        rows = h.json()
+        assert rows, "история пуста — прогон не записан"
+        top = rows[0]
+        assert top["comment"] == "ENG-405 заболел"
+        assert top["comment_considered"] is True
+        assert "версия" in top["version_label"]
+        assert top["mode"] in ("llm", "fallback")
+        assert isinstance(top["advice"], list)

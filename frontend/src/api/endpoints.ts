@@ -1,5 +1,6 @@
 import { request, requestRoot, query } from './client'
 import type {
+  AdviceHistoryItem,
   AdviceReport,
   BusFactorReport,
   BusForecast,
@@ -119,7 +120,9 @@ export const api = {
   listWorkspaces: () => requestRoot<WorkspaceInfo[]>('GET', '/workspaces'),
   createWorkspace: (name: string) => requestRoot<{ id: string; name: string }>('POST', '/workspaces', { name }),
 
-  // AI-советник (change 015): одноразовый прогон, comment — контекст прогона (не сохраняется)
+  // AI-советник (change 015/043): одноразовый прогон; история прогонов по версии плана
   getAdvice: (planId: string, comment?: string) =>
     request<AdviceReport>('GET', `/plans/${planId}/advice${comment ? `?comment=${encodeURIComponent(comment)}` : ''}`),
+  getAdviceHistory: (planId: string) =>
+    request<AdviceHistoryItem[]>('GET', `/plans/${planId}/advice/history`),
 }

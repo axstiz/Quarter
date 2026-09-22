@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.importer import import_dataset, reset_dataset_tables
 from src.db.models import (
+    AdviceReportORM,
     DependencyORM,
     EngineerORM,
     OptimizationJobORM,
@@ -996,7 +997,48 @@ async def advice_endpoint(plan_id: str, comment: str | None = None,
         advice = [a for a in advice if not (set(a.affected_task_ids) & pinned_ids)]
 
     report = AdviceReport(mode=mode, comment_considered=bool(comment), advice=advice)
+    # change 043: прогон сохраняется в историю (comment теперь сохраняется — решение лида)
+    ctx.session.add(AdviceReportORM(
+        workspace_id=ctx.workspace_id, plan_id=plan_id, mode=mode,
+        advice=[a.model_dump() for a in advice], comment=(comment or "")[:500],
+        comment_considered=bool(comment),
+    ))
+    await ctx.session.commit()
     return report.model_dump()
+
+
+@router.get("/plans/{plan_id}/advice/history")
+async def advice_history(plan_id: str, ctx: Context = Depends(require_context)) -> list[dict]:
+    """change 043: история прогонов советов по версии плана (per-plan_id),
+    каждая запись с version_label (номер версии в цепочке + дата)."""
+    plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
+    if not plan_orm:
+        raise HTTPException(status_code=404, detail="план не найден")
+    from sqlalchemy import select
+
+    rows = (await ctx.session.execute(select(AdviceReportORM).where(
+        AdviceReportORM.plan_id == plan_id,
+        AdviceReportORM.workspace_id == ctx.workspace_id,
+    ).order_by(AdviceReportORM.created_at.desc()))).scalars().all()
+    # version_label: порядковый номер версии в цепочке parent_plan_id (1=initial)
+    chain = [plan_orm]
+    cur = plan_orm
+    while cur.parent_plan_id:
+        parent = await get_plan_orm(ctx.session, cur.parent_plan_id, ctx.workspace_id)
+        if not parent:
+            break
+        chain.insert(0, parent)
+        cur = parent
+    version_no = {p.plan_id: i + 1 for i, p in enumerate(chain)}
+    return [
+        {
+            "advice_id": r.advice_id, "mode": r.mode, "comment": r.comment,
+            "comment_considered": r.comment_considered,
+            "advice": r.advice or [], "created_at": str(r.created_at),
+            "version_label": f"версия {version_no.get(plan_id, '?')} · {str(r.created_at)[:16]}",
+        }
+        for r in rows
+    ]
 
 
 async def _advice_warnings(plan_id, plan, plan_orm, tasks, deps, engineers, done_task_ids, ctx):

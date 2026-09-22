@@ -211,6 +211,17 @@ export interface AdviceReport {
   advice: AdviceItem[]
 }
 
+/** change 043: запись истории советов по версии плана. */
+export interface AdviceHistoryItem {
+  advice_id: string
+  mode: 'llm' | 'fallback'
+  comment: string
+  comment_considered: boolean
+  advice: AdviceItem[]
+  created_at: string
+  version_label: string
+}
+
 export type WarningKind = 'deadline_overflow' | 'dependency_shift' | 'role_deficit' | 'grade_deficit' | 'composition_change'
 
 export interface PlanWarning {
