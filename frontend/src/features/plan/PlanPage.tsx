@@ -1,4 +1,4 @@
-import { CalendarRange, Lightbulb, RotateCcw, ShieldAlert, Sparkles, Upload } from 'lucide-react'
+import { ArrowRight, CalendarRange, Lightbulb, RotateCcw, ShieldAlert, Sparkles, Upload } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -24,6 +24,7 @@ import { GanttView } from './GanttView'
 import { RolesView } from './RolesView'
 import { TaskPanelContent } from './TaskPanel'
 import { AdvicePanelContent } from './AdvicePanel'
+import { NotFitPanelContent } from './NotFitPanel'
 import { Panel } from '@/components/ui/Panel'
 
 /** 019 §3.1: правился ли датасет после создания активной версии плана (localStorage per workspace). */
@@ -68,6 +69,7 @@ export function PlanPage() {
   const [taskId, setTaskId] = useParam('task')
   const [riskPanel, setRiskPanel] = useParam('risks')
   const [advicePanel, setAdvicePanel] = useParam('advice')
+  const [fitPanel, setFitPanel] = useParam('fit')
   const [, setPlanParam] = useParam('plan')
 
   // 021 §3.2: чужой/недоступный план (?plan= чужого workspace) — тост и сброс ссылки, без переброса
@@ -162,19 +164,21 @@ export function PlanPage() {
   const partialCount = inPlan.filter(isPartial).length
   const spLeft = inPlan.reduce((a, t) => a + t.plannedSp, 0)
   const current = view ?? 'sprints'
-  const panelKey = taskId ? `task:${taskId}` : riskPanel === '1' ? 'risks' : advicePanel === '1' ? 'advice' : null
+  const panelKey = taskId ? `task:${taskId}` : riskPanel === '1' ? 'risks' : advicePanel === '1' ? 'advice' : fitPanel === '1' ? 'fit' : null
   // Сетки спринтов при сжатии теряют читаемость (ключи обрезаются) — на них панель ложится поверх
   const overlay = current === 'sprints' || current === 'roles'
 
   const openTask = (id: string) => {
     setRiskPanel(null)
     setAdvicePanel(null)
+    setFitPanel(null)
     setTaskId(id)
   }
   const closePanel = () => {
     setTaskId(null)
     setRiskPanel(null)
     setAdvicePanel(null)
+    setFitPanel(null)
   }
 
   return (
@@ -187,7 +191,7 @@ export function PlanPage() {
             <div className="page-head__sub">{plan.data ? `${versionLabel(plan.data)} · 6 спринтов по 2 недели` : 'Загрузка…'}</div>
           </div>
           <div className="page-head__actions">
-            <Button variant="ghost" icon={<Lightbulb />} onClick={() => { setTaskId(null); setRiskPanel(null); setAdvicePanel('1') }}>
+            <Button variant="ghost" icon={<Lightbulb />} onClick={() => { setTaskId(null); setRiskPanel(null); setFitPanel(null); setAdvicePanel('1') }}>
               Советы
             </Button>
             <Button variant="primary" icon={<Sparkles />} loading={optimize.isPending} disabled={readOnly} onClick={runOptimize}>
@@ -257,7 +261,7 @@ export function PlanPage() {
                   )}
                 </span>
                 {planRisk.data != null && planRisk.data.total_at_risk > 0 && (
-                  <Button size="sm" variant="ghost" className="stat__action" icon={<ShieldAlert />} onClick={() => { setTaskId(null); setRiskPanel('1') }}>
+                  <Button size="sm" variant="ghost" className="stat__action" icon={<ShieldAlert />} onClick={() => { setTaskId(null); setAdvicePanel(null); setFitPanel(null); setRiskPanel('1') }}>
                     Какие задачи
                   </Button>
                 )}
@@ -272,6 +276,11 @@ export function PlanPage() {
                 { value: 'load', label: 'Загрузка команд и ролей' },
                 { value: 'priority', label: 'Приоритеты' },
               ]}
+              right={model && outsideCount + partialCount > 0 && (
+                <Button size="sm" variant="ghost" icon={<ArrowRight />} aria-pressed={fitPanel === '1'} onClick={() => { setTaskId(null); setRiskPanel(null); setAdvicePanel(null); setFitPanel('1') }}>
+                  Не влезают · {outsideCount + partialCount}
+                </Button>
+              )}
             />
 
             {!plan.data || !model || tasks.isLoading ? (
@@ -302,12 +311,13 @@ export function PlanPage() {
         overlay={overlay}
         contentKey={plan.data ? panelKey : null}
         onClose={closePanel}
-        eyebrow={taskId ?? (advicePanel === '1' ? 'AI-советник' : 'Bus Factor')}
-        title={taskId ? (model?.tasks.get(taskId)?.summary ?? tasks.data?.find((t) => t.task_id === taskId)?.summary ?? taskId) : advicePanel === '1' ? 'Советы по плану' : 'Задачи под угрозой'}
+        eyebrow={taskId ?? (advicePanel === '1' ? 'AI-советник' : fitPanel === '1' ? 'Квартал' : 'Bus Factor')}
+        title={taskId ? (model?.tasks.get(taskId)?.summary ?? tasks.data?.find((t) => t.task_id === taskId)?.summary ?? taskId) : advicePanel === '1' ? 'Советы по плану' : fitPanel === '1' ? 'Не влезают в квартал' : 'Задачи под угрозой'}
       >
         {model && plan.data && taskId && <TaskPanelContent model={model} planId={plan.data.plan_id} taskId={taskId} tasksInfo={tasks.data ?? []} busFactor={bus.data} readOnly={readOnly} onSelect={openTask} />}
         {plan.data && !taskId && riskPanel === '1' && <RiskPanelContent planRisk={planRisk.data} error={planRisk.error} onRetry={() => planRisk.refetch()} onSelect={openTask} />}
         {plan.data && !taskId && advicePanel === '1' && <AdvicePanelContent planId={plan.data.plan_id} />}
+        {model && !taskId && fitPanel === '1' && <NotFitPanelContent model={model} onSelect={openTask} />}
       </Panel>
 
       <ConfirmDialog

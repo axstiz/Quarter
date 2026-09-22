@@ -33,8 +33,8 @@ function initiativeStatus(items: TaskSummary[]) {
   const inPlan = items.filter((x) => x.sprints.length).length
   const total = items.length
   const parts = (full: number) => [done && `${done} выполнено`, full && `${full} успеют`, partial && `${partial} не успеют целиком`, inPlan < total && `${total - inPlan} вне квартала`].filter(Boolean).join(' · ')
-  if (done === total) return { mark: '✓', tone: 'done', text: 'инициатива выполнена' }
-  if (inPlan === total && !partial) return { mark: '✓', tone: 'plan', text: `успеет в квартал · ${parts(inPlan - done)}` }
+  if (done === total) return { mark: '✓', tone: 'fact', text: 'инициатива выполнена' }
+  if (inPlan === total && !partial) return { mark: '✓', tone: 'done', text: `успеет в квартал · ${parts(inPlan - done)}` }
   if (!inPlan) return { mark: '✕', tone: 'over', text: 'не попала в квартал' }
   return { mark: '◐', tone: 'shift', text: `под угрозой · ${parts(inPlan - partial - done)}` }
 }
@@ -222,6 +222,13 @@ export function GanttView({ model, planRisk, factSprintOf, selectedId, onSelect 
   )
 }
 
+/** Положение сегмента в непрерывном отрезке полосы: пауза (пропущенный спринт) закрывает отрезок с обеих сторон. */
+function capOf(sprints: number[], n: number): 'start' | 'end' | 'both' | 'mid' {
+  const start = !sprints.includes(n - 1)
+  const end = !sprints.includes(n + 1)
+  return start && end ? 'both' : start ? 'start' : end ? 'end' : 'mid'
+}
+
 /** Одна полоса через спринты задачи: сегмент на каждую часть с долей SP, пропущенные спринты — пунктирный разрыв. */
 function Bar({ task, sprints, partial, spIn, doneIn, onOpen }: { task: TaskSummary; sprints: number[]; partial: boolean; spIn: (n: number) => number; doneIn: (n: number) => boolean; onOpen: () => void }) {
   const from = sprints[0]
@@ -242,7 +249,7 @@ function Bar({ task, sprints, partial, spIn, doneIn, onOpen }: { task: TaskSumma
     >
       {span.map((n) =>
         sprints.includes(n) ? (
-          <span key={n} className="gantt__seg" data-done={doneIn(n) || undefined}>
+          <span key={n} className="gantt__seg" data-cap={capOf(sprints, n)} data-done={doneIn(n) || undefined}>
             {doneIn(n) ? <><Check aria-hidden /> выполнена</> : `${fmtSp(spIn(n))} SP`}
           </span>
         ) : (

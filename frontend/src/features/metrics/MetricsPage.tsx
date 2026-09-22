@@ -162,7 +162,7 @@ function Kpi({ label, hint, forecast, border, norm, value, children }: { label: 
     <div style={{ padding: 'var(--s-4)', borderLeft: border ? '1px solid var(--rule)' : undefined }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
         <span className="stat__label">{label}</span>
-        {forecast && <Badge tone="shift">прогноз</Badge>}
+        {forecast && <Badge tone="neutral">прогноз</Badge>}
       </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 4 }}>
         <span style={{ fontSize: 'var(--text-3xl)', fontWeight: 600, letterSpacing: '-0.02em' }}>{children}</span>
@@ -201,7 +201,7 @@ function SprintChart({ data }: { data: SprintPoint[] }) {
           return (
             <div key={d.n} className="sdchart__col" tabIndex={0} aria-label={label} data-forecast={d.forecast || undefined}>
               <div className="sdchart__value">
-                {d.forecast ? <span className="muted">прогноз</span> : <><b className="tabular">{pct(d.pct)}</b>{d.pct != null && <NormStatus value={d.pct} norm={[90, 105]} />}</>}
+                {d.forecast ? <Badge tone="neutral">прогноз</Badge> : <><b className="tabular">{pct(d.pct)}</b>{d.pct != null && <NormStatus value={d.pct} norm={[90, 105]} />}</>}
               </div>
               <div className="sdchart__area">
                 <span className="sdchart__planned" style={{ height: h(d.planned) }} />

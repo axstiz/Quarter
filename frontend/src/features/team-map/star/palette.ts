@@ -23,6 +23,7 @@ export interface MapColors {
   dimNode: string
   dimEdge: string
   edge: string
+  labelShadow: string
 }
 
 export function readMapColors(): MapColors {
@@ -50,5 +51,7 @@ export function readMapColors(): MapColors {
     // рёбра WebGL — непрозрачными цветами: полупрозрачные смешиваются неровно и «светятся» в тёмной теме
     dimEdge: dark ? '#1d2025' : '#f1f2f4',
     edge: dark ? '#353a44' : '#d9dce1',
+    // тень плашки подписи: на тёмном фоне светлая тень не видна — плотнее
+    labelShadow: dark ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.18)',
   }
 }

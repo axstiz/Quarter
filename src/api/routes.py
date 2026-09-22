@@ -1413,12 +1413,24 @@ async def pin_task(
     if item.decision == PlanDecision.done_actual.value:
         raise HTTPException(status_code=409, detail="задача закрыта фактом — закреплять нельзя")
 
+    # change 047: part-level pin — двигается только часть из from_sprint_no,
+    # остальные части задачи остаются на своих спринтах
+    moved_rows = [
+        it for it in items
+        if it.task_id == task_id and (body.from_sprint_no is None or it.sprint_no == body.from_sprint_no)
+    ]
+    if not moved_rows:
+        raise HTTPException(status_code=404, detail=f"у задачи {task_id} нет части в спринте {body.from_sprint_no}")
+    if any(it.decision == PlanDecision.done_actual.value for it in moved_rows):
+        raise HTTPException(status_code=409, detail="задача закрыта фактом — закреплять нельзя")
+    moved_ids = {id(it) for it in moved_rows}
+
     if body.engineer_id:
         # лёгкая проверка ёмкости: часы КОНКРЕТНОГО инженера в перемещаемых строках
         # + его загрузка в целевом спринте другими задачами > лимит → 409
         need = sum(
             (a.get("hours") or 0.0)
-            for it2 in items if it2.task_id == task_id
+            for it2 in moved_rows
             for a in (it2.assignments or [])
             if a.get("engineer_id") == body.engineer_id
         )
@@ -1427,7 +1439,7 @@ async def pin_task(
         placed = sum(
             (a.get("hours") or 0.0)
             for it2 in items
-            if it2.task_id != task_id and (it2.pinned_sprint == body.sprint_no or it2.sprint_no == body.sprint_no)
+            if id(it2) not in moved_ids and (it2.pinned_sprint == body.sprint_no or it2.sprint_no == body.sprint_no)
             for a in (it2.assignments or [])
             if a.get("engineer_id") == body.engineer_id
         )
@@ -1436,14 +1448,32 @@ async def pin_task(
                 status_code=409,
                 detail=f"нужно {need:.0f} ч, свободно {max(0.0, limit - placed):.0f} ч — инженер {body.engineer_id} в спринте {body.sprint_no} не загрузится")
 
-    moved_rows = [it for it in items if it.task_id == task_id]
-    for row in moved_rows:
-        row.sprint_no = body.sprint_no
+    # все строки задачи в целевом спринте (перенесённые + уже стоявшие там)
+    # сливаются в одну: одна строка на (задача × спринт)
+    target_rows = [
+        it for it in items
+        if it.task_id == task_id and (id(it) in moved_ids or it.sprint_no == body.sprint_no)
+    ]
+    keep = target_rows[0]
+    merged_assignments: list[dict] = []
+    planned_sp = 0.0
+    has_sp = False
+    for row in target_rows:
+        if row.planned_sp is not None:
+            planned_sp += row.planned_sp
+            has_sp = True
         for a in (row.assignments or []):
-            a["sprint_no"] = body.sprint_no
-        row.pinned_sprint = body.sprint_no
-        row.pinned_engineer_id = body.engineer_id
-        row.pinned_position = body.position
+            merged_assignments.append({**a, "sprint_no": body.sprint_no})
+    keep.sprint_no = body.sprint_no
+    keep.planned_sp = planned_sp if has_sp else None
+    keep.assignments = merged_assignments  # новый список — JSON-колонка видит изменение
+    if not keep.reason:
+        keep.reason = next((r.reason for r in target_rows if r.reason), "")
+    keep.pinned_sprint = body.sprint_no
+    keep.pinned_engineer_id = body.engineer_id
+    keep.pinned_position = body.position
+    for row in target_rows[1:]:
+        await ctx.session.delete(row)
     await ctx.session.commit()
 
     return {"status": "pinned", "plan_id": plan_id, "task_id": task_id,
@@ -1475,11 +1505,13 @@ async def unpin_task(
 
     # change 032: unpin — снятие намерения без пересборки; задача будет
     # расставляться планировщиком на общих основаниях при следующем пересчёте
-    item = next((it for it in items if it.task_id == task_id), None)
-    if item is not None:
+    # «Вернуть» снимает закрепление задачи целиком — со всех её частей (047)
+    rows = [it for it in items if it.task_id == task_id]
+    for item in rows:
         item.pinned_sprint = None
         item.pinned_engineer_id = None
         item.pinned_position = None
+    if rows:
         await ctx.session.commit()
 
     return {"status": "unpinned", "plan_id": plan_id, "task_id": task_id, "applied": False}

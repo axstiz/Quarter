@@ -66,6 +66,9 @@ export function buildPlanModel(plan: Plan, tasksInfo: TaskInfo[]): PlanModel {
     }
   }
 
+  // одна строка на (задача × спринт): оптимизатор может положить две части задачи в один спринт
+  for (const n of SPRINT_NUMBERS) bySprint.set(n, mergeSameTask(bySprint.get(n)!))
+
   // нумерация частей задачи по спринтам
   const partsOf = new Map<string, number[]>()
   for (const n of SPRINT_NUMBERS) for (const t of bySprint.get(n)!) partsOf.set(t.task_id, [...(partsOf.get(t.task_id) ?? []), n])
@@ -118,6 +121,20 @@ export function buildPlanModel(plan: Plan, tasksInfo: TaskInfo[]): PlanModel {
   }
 
   return { sprints, outside, tasks }
+}
+
+/** Схлопывает строки одной задачи внутри спринта: SP суммируются, факт побеждает, причина — первая непустая. */
+function mergeSameTask(rows: PlanTask[]): PlanTask[] {
+  const byTask = new Map<string, PlanTask>()
+  for (const r of rows) {
+    const cur = byTask.get(r.task_id)
+    if (!cur) { byTask.set(r.task_id, { ...r }); continue }
+    if (r.step_points_sp != null) cur.step_points_sp = (cur.step_points_sp ?? 0) + r.step_points_sp
+    if (r.decision === 'done_actual') cur.decision = 'done_actual'
+    if (!cur.reason && r.reason) cur.reason = r.reason
+    if (cur.pinned_sprint == null && r.pinned_sprint != null) cur.pinned_sprint = r.pinned_sprint
+  }
+  return [...byTask.values()]
 }
 
 /** Задача влезла в квартал не целиком: остаток за 12-й неделей (причина от планировщика). */

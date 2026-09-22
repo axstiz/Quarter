@@ -57,7 +57,8 @@ export const api = {
   confirmCancel: (planId: string, taskId: string) =>
     request<{ status: string }>('POST', `/plans/${planId}/tasks/${taskId}/confirm-cancel`),
   /** pin/unpin (016): закрепление задачи за спринтом/носителем; бэк валидирует конфликт ёмкости (409) */
-  pinTask: (planId: string, taskId: string, body: { sprint_no: number; engineer_id?: string }) =>
+  /** from_sprint_no — перенос одной части задачи (047); без него двигается вся задача */
+  pinTask: (planId: string, taskId: string, body: { sprint_no: number; engineer_id?: string; from_sprint_no?: number }) =>
     request<{ status: string }>('POST', `/plans/${planId}/tasks/${taskId}/pin`, body),
   unpinTask: (planId: string, taskId: string) =>
     request<{ status: string }>('DELETE', `/plans/${planId}/tasks/${taskId}/pin`),

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import type { Decision } from '@/api/types'
 import { DECISION_LABEL } from '@/lib/labels'
 
-export type Tone = 'neutral' | 'plan' | 'done' | 'shift' | 'over' | 'pending'
+export type Tone = 'neutral' | 'plan' | 'done' | 'shift' | 'over' | 'pending' | 'fact'
 
 export function Badge({ tone = 'neutral', plain, children }: { tone?: Tone; plain?: boolean; children: ReactNode }) {
   return (
@@ -12,12 +12,13 @@ export function Badge({ tone = 'neutral', plain, children }: { tone?: Tone; plai
   )
 }
 
+/** Спека ui: запланировано — зелёный, перенос — жёлтый, кандидат на отмену — оранжевый, отмена — красный, факт — серый. */
 export const DECISION_TONE: Record<Decision, Tone> = {
-  planned: 'plan',
+  planned: 'done',
   postponed: 'shift',
   cancelled_pending: 'pending',
   cancelled: 'over',
-  done_actual: 'done',
+  done_actual: 'fact',
 }
 
 /** Цвет дублируется текстом — статус не передаётся одним цветом. */
