@@ -411,3 +411,41 @@ async def test_optimize_active_endpoint(auths):
             await session.commit()
         r = await ac.get("/api/v1/plans/optimize/active", headers=auth)
         assert r.json()["job_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_optimize_after_fact_keeps_horizon(auths, monkeypatch):
+    """change 058: оптимизация версии после факта наследует горизонт;
+    повторная оптимизация не ставит задачи в закрытый спринт 1."""
+    from src.db.session import SessionLocal
+    async with SessionLocal() as session:
+        await _seed_world(session)
+    monkeypatch.setattr("src.services.optimize_plan.solve_sidecar", _solver_draft_valid)
+    auth = auths["editor"]
+    plan_id = await _generate_plan(auth)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        # факт спринта 1 → дочерняя версия с recomputed_after_sprint=1
+        r = await ac.post(f"/api/v1/plans/{plan_id}/sprints/1/facts", headers=auth,
+                          json={"completed_sp": 5.0, "completed_task_ids": []})
+        assert r.status_code == 200
+        child = r.json()["new_plan_id"]
+
+        r = await ac.post("/api/v1/plans/optimize", headers=auth, json={"plan_id": child})
+        assert r.status_code == 200, r.text
+        opt1 = r.json()["plan_id"]
+
+        # горизонт унаследован оптимизированной версией
+        versions = (await ac.get("/api/v1/plans", headers=auth)).json()
+        v1 = next(v for v in versions if v["plan_id"] == opt1)
+        assert v1["recomputed_after_sprint"] == 1, v1
+
+        # повторная оптимизация уже оптимизированной версии — спринта 1 быть не должно
+        r = await ac.post("/api/v1/plans/optimize", headers=auth, json={"plan_id": opt1})
+        assert r.status_code == 200, r.text
+        opt2 = r.json()["plan_id"]
+        plan2 = (await ac.get(f"/api/v1/plans/{opt2}", headers=auth)).json()
+        sprint1 = [t for s in plan2["sprints"] if s["sprint_no"] == 1 for t in s["tasks"]]
+        assert not sprint1, f"solver поставил задачи в закрытый спринт 1: {sprint1}"
+        versions2 = (await ac.get("/api/v1/plans", headers=auth)).json()
+        v2 = next(v for v in versions2 if v["plan_id"] == opt2)
+        assert v2["recomputed_after_sprint"] == 1, v2

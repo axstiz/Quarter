@@ -534,6 +534,9 @@ async def apply_draft(session, workspace_id: str, source_plan_id: str, draft: di
         quarter_start=source.quarter_start,
         sprint_length_days=source.sprint_length_days or 14,
         strategy="optimization",
+        # change 058: горизонт наследуется — иначе следующая оптимизация этой версии
+        # снова планирует с 1-го спринта (факты «забываются»)
+        recomputed_after_sprint=source.recomputed_after_sprint,
     )
     session.add(new_orm)
     await session.flush()
@@ -615,9 +618,12 @@ async def run_optimization(session, workspace_id: str, plan_id: str, author_id: 
     """
     tasks_map, engineers, history, deps = await load_world(session, workspace_id=workspace_id)
     source = await load_plan_orm(session, plan_id, workspace_id)
-    first_free = ((source.recomputed_after_sprint if source else 0) or 0) + 1
     fact_rows = (await session.execute(select(SprintFactORM).where(
         SprintFactORM.workspace_id == workspace_id))).scalars().all()
+    # change 058: горизонт — от максимума (поле версии, последний загруженный факт):
+    # у версий-оптимизаций, созданных до 058, поле потеряно — факт надёжнее
+    last_fact = max((f.sprint_no for f in fact_rows), default=0)
+    first_free = max((source.recomputed_after_sprint if source else 0) or 0, last_fact) + 1
     done_ids = frozenset(
         {str(x) for f in fact_rows for x in (f.completed_task_ids or [])}
         | {t.task_id for t in tasks_map.values() if t.status == "Done"}
