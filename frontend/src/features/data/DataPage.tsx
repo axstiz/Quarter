@@ -157,7 +157,8 @@ function TasksTable({ highlight, invalidate }: { highlight?: string | null; inva
   ) : tasksQuery.isLoading ? (
     <SkeletonRows rows={8} cols={6} />
   ) : (
-    <table className="table table--compact">
+    <>
+      <table className="table table--compact">
       <thead>
         <tr>
           <th>task_id</th>
@@ -231,7 +232,52 @@ function TasksTable({ highlight, invalidate }: { highlight?: string | null; inva
           </tr>
         ))}
       </tbody>
-    </table>
+      </table>
+      <TaskAdd teams={roles.teams} invalidate={invalidate} />
+    </>
+  )
+}
+
+/** change 053: добавление строки задачи вручную — запись становится ручной (manual),
+ *  повторный импорт её не затирает. */
+function TaskAdd({ teams, invalidate }: { teams: string[]; invalidate: () => void }) {
+  const [taskId, setTaskId] = useState('')
+  const [summary, setSummary] = useState('')
+  const [team, setTeam] = useState('')
+  const [status, setStatus] = useState('ToDo')
+  const [sp, setSp] = useState('')
+  const [hh, setHh] = useState('')
+  const ok = taskId.trim() !== ''
+  const num = (v: string) => (v.trim() === '' ? undefined : Number(v.replace(',', '.')))
+  const validNum = (v: string) => v.trim() === '' || Number.isFinite(num(v))
+  return (
+    <div className="block" style={{ marginTop: 'var(--s-4)' }}>
+      <div className="block__head">
+        <h3>Добавить задачу</h3>
+        <span className="section__hint">часы ролей задаются после создания — колонка «Часы ролей» в строке задачи</span>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input className="input" style={{ width: 130, padding: '4px 8px' }} placeholder="task_id *" value={taskId} onChange={(e) => setTaskId(e.target.value)} />
+        <input className="input" style={{ width: 240, padding: '4px 8px' }} placeholder="Название" value={summary} onChange={(e) => setSummary(e.target.value)} />
+        <input className="input" style={{ width: 140, padding: '4px 8px' }} placeholder="Команда" list="task-add-teams" value={team} onChange={(e) => setTeam(e.target.value)} />
+        <datalist id="task-add-teams">{teams.map((t) => <option key={t} value={t} />)}</datalist>
+        <Select value={status} onChange={(e) => setStatus(e.target.value)} options={STATUS_OPTIONS.map((s) => ({ value: s, label: s }))} />
+        <input className="input" style={{ width: 70, padding: '4px 8px' }} placeholder="SP" value={sp} onChange={(e) => setSp(e.target.value)} />
+        <input className="input" style={{ width: 80, padding: '4px 8px' }} placeholder="Часы" value={hh} onChange={(e) => setHh(e.target.value)} />
+        <Button variant="secondary" disabled={!ok || !validNum(sp) || !validNum(hh)} onClick={() => {
+          void api.createTask({
+            task_id: taskId.trim(),
+            summary: summary || undefined,
+            team_id: team || undefined,
+            status,
+            estimation_sp: num(sp),
+            estimated_hh: num(hh),
+          })
+            .then(() => { markDataEdited(); invalidate(); toast.success(`Задача ${taskId} добавлена`); setTaskId(''); setSummary(''); setTeam(''); setSp(''); setHh('') })
+            .catch((e) => toast.error(errorTitle(e), { description: errorHint(e) }))
+        }}>Добавить</Button>
+      </div>
+    </div>
   )
 }
 
@@ -347,7 +393,8 @@ function PeopleTable({ highlight, invalidate }: { highlight?: string | null; inv
   if (engineers.error) return <ErrorAlert error={engineers.error} onRetry={() => engineers.refetch()} />
   if (engineers.isLoading) return <SkeletonRows rows={8} cols={5} />
   return (
-    <table className="table">
+    <>
+      <table className="table">
       <thead>
         <tr>
           <th>engineer_id</th><th>Команда</th><th>Роль</th><th>Грейд</th><th>Навыки</th><th>Ставка</th><th aria-label="Удаление" />
@@ -382,7 +429,44 @@ function PeopleTable({ highlight, invalidate }: { highlight?: string | null; inv
           </tr>
         ))}
       </tbody>
-    </table>
+      </table>
+      <PersonAdd teams={roles.teams} roles={roles.roles} invalidate={invalidate} />
+    </>
+  )
+}
+
+/** change 053: добавление инженера вручную (запись manual — импорт не затирает). */
+function PersonAdd({ teams, roles, invalidate }: { teams: string[]; roles: string[]; invalidate: () => void }) {
+  const [eid, setEid] = useState('')
+  const [team, setTeam] = useState('')
+  const [role, setRole] = useState('')
+  const [grade, setGrade] = useState('')
+  const [rate, setRate] = useState('1')
+  const ok = eid.trim() !== '' && team.trim() !== '' && role.trim() !== ''
+  return (
+    <div className="block" style={{ marginTop: 'var(--s-4)' }}>
+      <div className="block__head">
+        <h3>Добавить инженера</h3>
+        <span className="section__hint">новую команду сначала создайте во вкладке «Команды»</span>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input className="input" style={{ width: 130, padding: '4px 8px' }} placeholder="engineer_id *" value={eid} onChange={(e) => setEid(e.target.value)} />
+        <input className="input" style={{ width: 140, padding: '4px 8px' }} placeholder="Команда *" list="person-add-teams" value={team} onChange={(e) => setTeam(e.target.value)} />
+        <datalist id="person-add-teams">{teams.map((t) => <option key={t} value={t} />)}</datalist>
+        <input className="input" style={{ width: 190, padding: '4px 8px' }} placeholder="Роль *" list="person-add-roles" value={role} onChange={(e) => setRole(e.target.value)} />
+        <datalist id="person-add-roles">{roles.map((r) => <option key={r} value={r} />)}</datalist>
+        <input className="input" style={{ width: 100, padding: '4px 8px' }} placeholder="Грейд" value={grade} onChange={(e) => setGrade(e.target.value)} />
+        <Select value={rate} onChange={(e) => setRate(e.target.value)} options={[{ value: '1', label: 'ставка 1' }, { value: '0.5', label: 'ставка 0.5' }]} />
+        <Button variant="secondary" disabled={!ok} onClick={() => {
+          void api.createEngineer({
+            engineer_id: eid.trim(), team_id: team.trim(), role: role.trim(),
+            grade: grade || undefined, capacity_rate: Number(rate),
+          })
+            .then(() => { markDataEdited(); invalidate(); toast.success(`${eid} добавлен`); setEid(''); setTeam(''); setRole(''); setGrade('') })
+            .catch((e) => toast.error(errorTitle(e), { description: errorHint(e) }))
+        }}>Добавить</Button>
+      </div>
+    </div>
   )
 }
 
@@ -395,7 +479,8 @@ function TeamsTable({ invalidate }: { invalidate: () => void }) {
   ) : teamsQuery.isLoading ? (
     <SkeletonRows rows={4} cols={3} />
   ) : (
-    <table className="table">
+    <>
+      <table className="table">
       <thead>
         <tr><th>Команда</th><th>Инженеров</th><th>Ёмкость SP/спринт</th><th aria-label="Удаление" /></tr>
       </thead>
@@ -414,7 +499,33 @@ function TeamsTable({ invalidate }: { invalidate: () => void }) {
           </tr>
         ))}
       </tbody>
-    </table>
+      </table>
+      <TeamAdd invalidate={invalidate} />
+    </>
+  )
+}
+
+/** change 053: добавление команды вручную; история velocity задаётся импортом —
+ *  без неё команда получает виртуальную ёмкость при планировании. */
+function TeamAdd({ invalidate }: { invalidate: () => void }) {
+  const [teamId, setTeamId] = useState('')
+  const [name, setName] = useState('')
+  return (
+    <div className="block" style={{ marginTop: 'var(--s-4)' }}>
+      <div className="block__head">
+        <h3>Добавить команду</h3>
+        <span className="section__hint">после создания добавьте инженеров во вкладке «Люди»</span>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input className="input" style={{ width: 160, padding: '4px 8px' }} placeholder="team_id *" value={teamId} onChange={(e) => setTeamId(e.target.value)} />
+        <input className="input" style={{ width: 220, padding: '4px 8px' }} placeholder="Название" value={name} onChange={(e) => setName(e.target.value)} />
+        <Button variant="secondary" disabled={teamId.trim() === ''} onClick={() => {
+          void api.createTeam(teamId.trim(), name || undefined)
+            .then(() => { markDataEdited(); invalidate(); toast.success(`Команда ${teamId} добавлена`); setTeamId(''); setName('') })
+            .catch((e) => toast.error(errorTitle(e), { description: errorHint(e) }))
+        }}>Добавить</Button>
+      </div>
+    </div>
   )
 }
 

@@ -280,7 +280,6 @@ def allocate_engineers(draft: dict, tasks: dict[str, Task], engineers: list[Engi
     for it in draft["items"]:
         team = it["team_id"]
         role_hours = {_rl(r): float(h) for r, h in (it.get("role_hours") or {}).items() if h}
-        orig_names = {_rl(r): r for r in (it.get("role_hours") or {})}
         hours_total = sum(role_hours.values())
         hours_left = dict(role_hours)
         sp_to_place = float(it["step_points_sp"])
@@ -308,7 +307,7 @@ def allocate_engineers(draft: dict, tasks: dict[str, Task], engineers: list[Engi
                     hours_left[rl] = round(need - got, 2)
                     for eid, h_placed in ass_list:
                         sprint_ass.append({
-                            "task_id": it["task_id"], "role": orig_names.get(rl, rl),
+                            "task_id": it["task_id"], "role": orig_roles.get(rl, rl),
                             "engineer_id": eid, "sprint_no": sprint, "hours": h_placed,
                             "is_pinned": False,
                         })

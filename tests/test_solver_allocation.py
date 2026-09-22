@@ -127,3 +127,15 @@ def test_validate_draft_counts_part_hours_not_full_task():
     ], "staffing_moves": []}
     violations = validate_draft(draft, {"T-1": task}, engineers, _history(), [])
     assert not violations, f"части по 80 ч в разных спринтах не нарушают роль-гейт: {violations}"
+
+
+def test_assignment_role_uses_display_name():
+    """change 052: role в assignments — display-имя из задач/инженеров,
+    не нормализованный ключ части (без пробелов/регистра)."""
+    task = _task("T-1", 10.0, {"Тестировщик (Автотестирование)": 40.0})
+    engineers = _engineers(("E-1", TEAM, "Тестировщик (Автотестирование)", 1.0))
+    # часть solver несёт нормализованные ключи ролей (snapshot _rl)
+    draft = _run([_draft_item("T-1", 1, 1, 10.0, {"тестировщик(автотестирование)": 40.0})],
+                 {"T-1": task}, engineers)
+    ass = draft["items"][0]["assignments"]
+    assert ass and all(a["role"] == "Тестировщик (Автотестирование)" for a in ass), ass

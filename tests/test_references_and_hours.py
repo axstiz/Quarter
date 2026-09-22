@@ -35,7 +35,8 @@ async def test_import_references_and_hours(auths):
         t_data = task_resp.json()
         assert "role_hours_actual" in t_data
         assert isinstance(t_data["role_hours_actual"], dict)
-        assert t_data["role_hours_actual"]["аналитик"] == 80.0
+        # change 052: фактические часы с display-именами ролей («Аналитик», не «аналитик»)
+        assert t_data["role_hours_actual"]["Аналитик"] == 80.0
 
         # Task without actual hours
         task_no_actual = await client.get("/api/v1/tasks/ONK-2475", headers=h)

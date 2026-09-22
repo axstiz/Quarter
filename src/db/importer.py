@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from datetime import date
 from pathlib import Path
 
@@ -18,6 +19,13 @@ from src.db.models import (
 )
 
 EXCEL_EPOCH = date(1899, 12, 30)
+
+
+def _role_key(role: str) -> str:
+    """Канонический ключ роли: секция часов xlsx даёт машинные колонки
+    («разработчик_java»), секция требований — display-имена («Разработчик Java»);
+    ключ совпадает у обоих (change 052)."""
+    return re.sub(r"[\s_/\-\(\).]+", "", str(role).lower())
 
 FILES = {
     "tasks.csv",
@@ -193,6 +201,13 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path, workspace_id:
     counts["reference_values"] = len(ref_rows)
 
     hours_rows = read_csv(dataset_dir / "task_role_hours.csv")
+    # change 052: машинные имена колонок секции часов → display-имена из требований
+    await session.flush()
+    display_roles = (await session.execute(select(RoleRequirementORM.role).where(
+        RoleRequirementORM.workspace_id == workspace_id))).scalars().all()
+    role_display: dict[str, str] = {}
+    for disp in display_roles:
+        role_display.setdefault(_role_key(disp), disp)
     hours_count = 0
     for row in hours_rows:
         tid = row.get("task_id", "")
@@ -204,7 +219,7 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path, workspace_id:
                 session.add(TaskRoleHoursORM(
                     workspace_id=workspace_id,
                     task_id=tid,
-                    role=col,
+                    role=role_display.get(_role_key(col), col),
                     hours=val,
                 ))
                 hours_count += 1
