@@ -2,10 +2,6 @@ import { clearAuth, loadAuth } from './auth'
 
 export const API_BASE = '/api/v1'
 
-// Мок-режим включается VITE_API_MOCKS=true (.env.development).
-// Чтобы убрать моки: удалить src/mocks/, этот флаг и блок `if (USE_MOCKS)` ниже.
-export const USE_MOCKS = import.meta.env.VITE_API_MOCKS === 'true'
-
 export class ApiError extends Error {
   readonly status: number
 
@@ -21,7 +17,7 @@ let authRedirecting = false
 
 /** Ручки под /api/v1. */
 export async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
-  return doRequest(method, path, body, API_BASE)
+  return doRequest(method, path, body, '/api/v1')
 }
 
 /** Ручки, смонтированные на корне бэка (/workspaces, /permissions) — проксируются отдельно от /api/v1. */
@@ -30,16 +26,6 @@ export async function requestRoot<T>(method: Method, path: string, body?: unknow
 }
 
 async function doRequest<T>(method: Method, path: string, body: unknown, base: string): Promise<T> {
-  if (USE_MOCKS) {
-    const { handleMock } = await import('../mocks')
-    const auth = loadAuth()
-    const headers: Record<string, string> = {}
-    if (auth?.token) headers.Authorization = `Bearer ${auth.token}`
-    const ws = auth?.workspaceId
-    if (ws && ws !== 'default') headers['X-Workspace-Id'] = ws
-    return handleMock<T>(method, path, body, headers)
-  }
-
   const isForm = body instanceof FormData
   const headers: Record<string, string> = body && !isForm ? { 'Content-Type': 'application/json' } : {}
   const auth = loadAuth()

@@ -2,9 +2,9 @@ import { AnimatePresence, motion } from 'motion/react'
 import { BarChart3, Building2, CalendarRange, ClipboardCheck, LogOut, Menu, Moon, Sparkles, Sun, Table2, Upload } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { USE_MOCKS } from '@/api/client'
+import { getRole, getWorkspaceId } from '@/api/auth'
 import { useCurrentPlanId, useDatasetLoaded, useFacts, usePlanVersions, useSwitchWorkspace, useWorkspaces } from '@/api/queries'
-import { clearAuth, getRole, getWorkspaceId } from '@/api/auth'
+import { clearAuth } from '@/api/auth'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Field'
 import { formatDateTime } from '@/lib/format'
@@ -71,7 +71,7 @@ function Sidebar({ open }: { open: boolean }) {
   const { theme, toggle } = useTheme()
   // change 035: датасет загружен? (для серой навигации до импорта)
   const dsStatus = useDatasetLoaded()
-  const datasetLoaded = Boolean(USE_MOCKS || dsStatus.data?.dataset_loaded)
+  const datasetLoaded = Boolean(dsStatus.data?.dataset_loaded)
   const plan = params.get('plan')
   const search = plan ? `?plan=${plan}` : ''
   const workspaces = useWorkspaces()
@@ -131,7 +131,7 @@ function Sidebar({ open }: { open: boolean }) {
         <Link
           to="/login"
           className="nav__item"
-          onClick={() => { if (!USE_MOCKS || getRole()) clearAuth() }}
+          onClick={() => { if (getRole()) clearAuth() }}
         >
           <LogOut aria-hidden />
           <span>Выйти</span>
@@ -140,9 +140,9 @@ function Sidebar({ open }: { open: boolean }) {
           <span
             className="muted"
             style={{ fontSize: 'var(--text-2xs)' }}
-            title={USE_MOCKS ? 'VITE_API_MOCKS=true — данные из src/mocks' : 'Данные из /api/v1'}
+            title="Данные из /api/v1"
           >
-            {USE_MOCKS ? 'Мок-данные' : 'API подключён'}
+            API подключён
           </span>
           <Button variant="ghost" size="sm" iconOnly icon={theme === 'dark' ? <Sun /> : <Moon />} onClick={toggle} aria-label={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'} />
         </div>

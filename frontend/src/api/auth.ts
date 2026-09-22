@@ -95,13 +95,8 @@ async function authRequest(path: string, body: unknown): Promise<AuthPayload> {
   return data as AuthPayload
 }
 
-/** Демо-вход (reader|editor|admin); при моках — фиктивная сессия без сети. */
+/** Демо-вход (reader|editor|admin). */
 export async function demoLogin(role: AuthRole): Promise<AuthSession> {
-  if (import.meta.env.VITE_API_MOCKS === 'true') {
-    const session: AuthSession = { token: 'mock', role, email: `demo_${role}@postcode.local`, userId: role }
-    saveAuth(session)
-    return session
-  }
   const payload = await authRequest('/demo-login', { role })
   const session = parse(payload)
   saveAuth(session)
@@ -109,11 +104,6 @@ export async function demoLogin(role: AuthRole): Promise<AuthSession> {
 }
 
 export async function login(email: string, password: string): Promise<AuthSession> {
-  if (import.meta.env.VITE_API_MOCKS === 'true') {
-    const session: AuthSession = { token: 'mock', role: 'editor', email, userId: 'mock' }
-    saveAuth(session)
-    return session
-  }
   const payload = await authRequest('/login', { email, password })
   const session = parse(payload)
   saveAuth(session)

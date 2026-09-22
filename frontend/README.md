@@ -5,11 +5,11 @@ Radix Dialog (подтверждения), Lucide (иконки). Стили —
 
 ```bash
 npm install
-npm run dev     # http://localhost:5173, моки включены в .env.development
-npm run build   # страницы грузятся лениво, моки в прод-бандл не попадают
+npm run dev     # http://localhost:5173, реальный API через Vite proxy → :8000
+npm run build   # страницы грузятся лениво
 ```
 
-Реальный бэкенд: `VITE_API_MOCKS=false`, Vite проксирует `/api` → `http://localhost:8000`.
+Реальный бэкенд: Vite проксирует `/api` → `http://localhost:8000` (моки удалены, change 044).
 
 ## Дизайн-система
 
@@ -69,13 +69,12 @@ npm run build   # страницы грузятся лениво, моки в п
 
 ```
 src/
-  api/        client.ts (fetch + флаг моков + X-Workspace-Id) · endpoints.ts · queries.ts · types.ts · auth.ts (сессия + активный workspace)
+  api/        client.ts (fetch + X-Workspace-Id) · endpoints.ts · queries.ts · types.ts · auth.ts (сессия + активный workspace)
   app/        Layout (навигация, селектор workspace, версия плана, индикатор квартала), router, тема
   components/ui  Button, Field/Select/Textarea, Badge, Meter, Tabs, Panel, ConfirmDialog, AnimatedNumber, Group, States
   styles/     tokens · base · layout · components
   lib/        format, labels, motion (кривые/длительности), useParam (состояние в URL)
   features/   plan · sprint · team-map · metrics · import · auth · workspace (онбординг, участники, права)
-  mocks/      мок-бэкенд в памяти (только при VITE_API_MOCKS=true)
 ```
 
 ### Workspace-контекст (change 021)
@@ -87,35 +86,9 @@ src/
 
 ## Моки
 
-`src/mocks` — мок-бэкенд, который повторяет реальный, а не придумывает данные:
+Моки удалены (change 044): фронт ходит только в реальный API через Vite proxy → `http://localhost:8000`. Режима без бэка нет — для локальной разработки поднимай бэк (`docker compose up -d api db`).
 
-- **Данные** (`mocks/data/dataset.ts`) сняты с ответов бэка после `POST /data/import`: задачи, инженеры, зависимости, история команд, ответ `/data/upload` на xlsx-датасет. Приоритеты — по правилам импортёра.
-- **Логика** (`mocks/engine.ts`) — построчный порт `src/services/planner.py`, `replanner.py`, `metrics.py`, `bus_factor.py`, `routes._recomputed_plan`. Задачи разбиваются между спринтами так же, как на бэке.
-- **Ручки** (`mocks/index.ts`) — те же статусы, тексты ошибок, форматы (`created_at` без `T`), хранение строк плана как в `plan_items`.
-- **Стартовое состояние** — как бэк после импорта: данные есть, планов нет. Состояние переживает перезагрузку (localStorage); сброс — открыть любую страницу с `?mock-reset`.
 
-Сверка с реальным бэком (бэк на SQLite, без Docker): `POSTCODE_DATABASE_URL=sqlite+aiosqlite:///tmp/t.db uv run uvicorn src.main:app --port 8765`, затем один и тот же сценарий из 38 запросов гоняется по бэку и по моку и сравнивается по значениям. На момент сверки расхождения только там, где мок следует спеке, а бэк — нет (см. ниже).
-
-### Расхождения бэка со спекой (мок следует спеке)
-
-| # | Что на бэке | Что по спеке / в моке |
-|---|---|---|
-| 1 | `confirm-cancel` меняет только текст причины, `decision` остаётся `cancelled_pending` | задача становится `cancelled` |
-| 2 | Метрики версии после факта не учитывают факт родителя: у пересчитанного плана все спринты «прогноз» | факты по всей цепочке версий |
-| 3 | Пересчёт берёт факты только текущей версии: при втором факте задачи, закрытые первым, планируются заново; повтор факта того же спринта в дочерней версии не даёт 409 | факты и 409 по всей цепочке |
-| 5 | `recompute` по умолчанию `after_sprint=0` — перепланирует уже прошедшие спринты | фронт передаёт `after_sprint` = последний спринт с фактом |
-| 6 | Предупреждения «дефицит роли» сравнивают роли с учётом регистра и только внутри команды (десятки сообщений, `доступно 0 ч`) | мок повторяет бэк; фронт группирует сообщения |
-| 7 | pin-пересборка плана (016) удаляет `done_actual`-строки версии — факт выпадает из плана до пересчёта | мок сохраняет выполненные строки (спека не определяет); мок-пин переносит задачу целиком в закреплённый спринт (бэк — planner с pins) |
-| 8 | `POST /workspaces/{id}/members` принимает `user_id`; реестра пользователей и приглашений по email на бэке нет (change 023) | мок принимает любой user_id как есть; UI приглашение не показывает (hint «change 023») |
-| 9 | мок не различает пользователей в пределах workspace (сессия одна) | роли в non-default ws задаются membership мока; демо-вход всегда admin (024) |
-| 10 | мок не хранит assignments (change 016) — прогноз bus factor пересчитывает раскладку role_hours по носителям из строк плана | на бэке прогноз строится по assignments версий плана (016/022) |
-
-## Как убрать моки
-
-1. `rm -rf src/mocks`
-2. В `src/api/client.ts` удалить `USE_MOCKS` и блок `if (USE_MOCKS) { … }`
-3. В `src/app/Layout.tsx` убрать ветку подписи «Мок-данные»
-4. Удалить `VITE_API_MOCKS` из `.env.development` и `src/vite-env.d.ts`
 
 ## Особенности данных бэка, которые учитывает фронт (`lib/planModel.ts`)
 
@@ -128,7 +101,5 @@ src/
 - Доступные часы роли: сумма `80 × ставка` по `/engineers`, сравнение названий ролей без учёта регистра
 - Приоритеты: `PUT /tasks/{id}/priority` по одной задаче, затем `POST /plans/{id}/recompute`; текущий `priority` в плане не отдаётся — исходный порядок берётся из раскладки по спринтам
 - warnings/diff запрашиваются у версии, в которую загружен факт (`parent_plan_id` текущего плана)
-
-- Ручные правки записей (019) в моке персистятся в localStorage (taskPatches) и применяются к шаблону датасета при загрузке; сброс — `?mock-reset`
 
 Задачи под угрозой Bus Factor и переносы считаются на бэке: `GET /plans/{id}/bus-risk` (change 015-гейт) и `POST/DELETE /plans/{id}/tasks/{tid}/pin` (change 016) — клиент только отображает.
