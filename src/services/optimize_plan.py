@@ -119,7 +119,60 @@ async def build_report(
         },
         "staffing_moves": staffing_moves,
         "score_breakdown": score_breakdown,
+        "split_by_team_role": {
+            "before": _split_by_team_role(source_plan, tasks_map, []),
+            "after": _split_by_team_role(new_plan, tasks_map, []),
+        },
     }
+
+
+
+def _split_by_team_role(plan: "Plan", tasks_map: dict[str, Task],
+                        engineers: list[Engineer]) -> list[dict]:
+    """change 041: разбиение per (team, role, sprint): SP/часы vs командный лимит.
+
+    Лимит роли в команде = Σ 80×capacity_rate её носителей (как в buildRoleModel
+    фронта); если носителей нет — виртуальный держатель 80 ч (company-wide, change 003).
+    """
+    from collections import defaultdict
+
+    rates: dict[tuple[str, str], float] = defaultdict(float)
+    for e in engineers:
+        rates[(e.team_id, e.role)] += 80.0 * (e.capacity_rate or 1.0)
+
+    by_key: dict[tuple[str, str], dict[int, dict[str, float]]] = defaultdict(
+        lambda: defaultdict(lambda: {"sp": 0.0, "hours": 0.0}))
+    for sprint in plan.sprints:
+        for item in sprint.items:
+            task = tasks_map.get(item.task_id)
+            team = (task.team_id if task else "") or "-"
+            sp = float(item.step_points_sp or 0.0)
+            if item.assignments:
+                role_hours = {}
+                for a in item.assignments:
+                    role = a.get("role") or "-"
+                    h = float(a.get("hours") or 0.0)
+                    if h > 0:
+                        role_hours[role] = role_hours.get(role, 0.0) + h
+            else:
+                role_hours = {r: float(v or 0.0) for r, v in (task.role_hours or {}).items()} if task else {}
+            for role, hours in role_hours.items():
+                cell = by_key[(team, role or "-")][sprint.sprint_no]
+                cell["hours"] += hours
+                cell["sp"] += sp
+    out = []
+    for (team, role), sprints in by_key.items():
+        limit = rates[(team, role)] or 80.0
+        placed = sum(v["hours"] for v in sprints.values())
+        # within_norm = все спринты в пределах командного лимита роли (лимит — за спринт)
+        within = all(v["hours"] <= limit + 0.05 for v in sprints.values())
+        out.append({
+            "team_id": team, "role": role, "sprints": sprints,
+            "limit_hours": round(limit, 1),
+            "within_norm": within,
+            "total_hours": round(placed, 1),
+        })
+    return sorted(out, key=lambda x: (x["team_id"], x["role"]))
 
 
 def _normalize_draft(response: dict, snapshot: dict, tasks: dict[str, Task],

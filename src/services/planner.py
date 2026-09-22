@@ -381,13 +381,16 @@ def generate_plan(
     for task_id in remaining:
         task = task_by_id[task_id]
         blockers_missing = [b for b in blocked_by.get(task_id, []) if b in task_by_id and b not in assigned_end and b not in done_blockers]
-        reason = (
-            "блокируется циклической зависимостью"
-            if any(b in tasks_in_cycle for b in blocked_by.get(task_id, []))
-            else ("не помещается: зависит от незапланированной " + ", ".join(blockers_missing[:3])
-                  if blockers_missing
-                  else "не влезла в ресурс/SP/роли до конца квартала — кандидат на отмену")
-        )
+        if blockers_missing:
+            reason = "не помещается: зависит от незапланированной " + ", ".join(blockers_missing[:3])
+        elif any(b in tasks_in_cycle for b in blocked_by.get(task_id, [])):
+            reason = "блокируется циклической зависимостью"
+        elif not history_by_team.get(task.team_id):
+            # change 042: команда без team_history — честная причина (раньше была общая «не влезла»)
+            reason = ("истории velocity нет (team_history пуст) — capacity команды = 0, задача не запланирована; "
+                      "задайте скорость команды или загрузите историю")
+        else:
+            reason = "не влезла в ресурс/SP/роли до конца квартала — кандидат на отмену"
         plan.decisions.append(Explanation(task_id=task_id, decision=PlanDecision.postponed, reason=reason))
 
     return plan

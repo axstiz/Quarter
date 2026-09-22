@@ -7,7 +7,7 @@ Solver-отчёт агрегирован по всему кварталу, не 
 ## What Changes
 
 - Оптимизационный отчёт: разбиение по (team × role × sprint): SP, часы, limit_hours командного лимита, within_norm — до и после solve
-- Java: WEIGHT_UTILIZATION 50 → 100 (чуть-чуть, benchmark демо — если хуже, откатываю)
+- Java: WEIGHT_UTILIZATION 50 → 100 было оценено бенчмарком на одном исходном плане: не улучшает (σ 10.77 vs 9.91, score идентичен) — вес остаётся 50 (benchmark-driven откат)
 - Фронт: баннер-сводка после optimize («SP выровнялись: σ 12.6 → 5.8» и т.п., режим solver/heuristic + degradation_reason)
 
 ## Capabilities
