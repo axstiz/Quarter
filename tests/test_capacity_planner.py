@@ -129,3 +129,42 @@ def test_empty_history_explains_not_planned():
     assert not any(i.task_id == "T-NH" for s in plan.sprints for i in s.items), "задача не должна планироваться"
     expl = [d for d in plan.decisions if d.task_id == "T-NH"]
     assert expl and "velocity" in expl[0].reason and "capacity" in expl[0].reason, expl[0].reason
+
+
+def test_own_team_preferred_over_loan():
+    """change 045: при наличии свободного своего носителя заём не берётся —
+    своя команда приоритетна в _put_hours."""
+    from src.services.planner import PlannerInput, generate_plan
+
+    # задача команды A требует Тестировщика; носитель есть и в A, и в B
+    task = Task(task_id="T-OWN", team_id="Team-A", status="ToDo", estimation_sp=5.0,
+                estimated_hh=40.0, role_hours={"Тестировщик": 40.0})
+    engineers = [
+        Engineer(engineer_id="E-A", team_id="Team-A", role="Тестировщик", capacity_rate=1.0, grade="Middle", skills_declared=""),
+        Engineer(engineer_id="E-B", team_id="Team-B", role="Тестировщик", capacity_rate=1.0, grade="Middle", skills_declared=""),
+    ]
+    history = [TeamHistory(team_id="Team-A", snapshot_date="2026-01-01", velocity_achieved=50.0, planned_sp=50.0),
+               TeamHistory(team_id="Team-B", snapshot_date="2026-01-01", velocity_achieved=50.0, planned_sp=50.0)]
+    plan = generate_plan(PlannerInput([task], engineers, history, []))
+    ass = [a for s in plan.sprints for i in s.items for a in i.assignments if i.task_id == "T-OWN"]
+    assert ass, "задача не разместилась"
+    assert all(a.engineer_id == "E-A" for a in ass), f"займ не должен браться: {ass}"
+
+
+def test_loan_only_when_own_exhausted():
+    """change 045: заём только когда своих в спринте не хватает."""
+    from src.services.planner import PlannerInput, generate_plan
+
+    # задача требует 120 ч Тестировщика, свой носитель — 80 ч, заёмный ещё 80
+    task = Task(task_id="T-LOAN", team_id="Team-A", status="ToDo", estimation_sp=5.0,
+                estimated_hh=120.0, role_hours={"Тестировщик": 120.0})
+    engineers = [
+        Engineer(engineer_id="E-A", team_id="Team-A", role="Тестировщик", capacity_rate=1.0, grade="Middle", skills_declared=""),
+        Engineer(engineer_id="E-B", team_id="Team-B", role="Тестировщик", capacity_rate=1.0, grade="Middle", skills_declared=""),
+    ]
+    history = [TeamHistory(team_id="Team-A", snapshot_date="2026-01-01", velocity_achieved=50.0, planned_sp=50.0)]
+    plan = generate_plan(PlannerInput([task], engineers, history, []))
+    ass = [a for s in plan.sprints for i in s.items for a in i.assignments if i.task_id == "T-LOAN"]
+    eng_used = {a.engineer_id for a in ass}
+    assert "E-A" in eng_used, "свой носитель должен использоваться"
+    assert "E-B" in eng_used, "займ допустим когда своих не хватает"

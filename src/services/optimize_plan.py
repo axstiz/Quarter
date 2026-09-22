@@ -247,10 +247,12 @@ def allocate_engineers(draft: dict, tasks: dict[str, Task], engineers: list[Engi
     """
     eng_limits: dict[str, float] = {}
     eng_roles: dict[str, set[str]] = defaultdict(set)
+    eng_teams: dict[str, str] = {}  # change 045: команда инженера — приоритет своей команды в _put_hours
     orig_roles: dict[str, str] = {}
     for eng in engineers:
         eng_limits[eng.engineer_id] = engineer_sprint_limit(eng.capacity_rate)
         eng_roles[eng.engineer_id].add(_rl(eng.role))
+        eng_teams[eng.engineer_id] = eng.team_id
         orig_roles.setdefault(_rl(eng.role), eng.role)
 
     all_roles = {_rl(rl): rl for t in tasks.values() for rl in (t.role_hours or {})}
@@ -300,7 +302,8 @@ def allocate_engineers(draft: dict, tasks: dict[str, Task], engineers: list[Engi
                     if need <= 0:
                         continue
                     got, ass_list = _put_hours(rl, need, sprint, eng_limits, eng_roles,
-                                               eng_used, orig_roles)
+                                               eng_used, orig_roles,
+                                               eng_teams=eng_teams, task_team_id=it["team_id"])
                     placed_hh += got
                     hours_left[rl] = round(need - got, 2)
                     for eid, h_placed in ass_list:

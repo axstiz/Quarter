@@ -78,14 +78,23 @@ def _put_hours(
     eng_used: dict[int, dict[str, float]],
     orig_roles: dict[str, str],
     preferred_engineer_id: str | None = None,
+    eng_teams: dict[str, str] | None = None,
+    task_team_id: str | None = None,
 ) -> tuple[float, list[tuple[str, float]]]:
-    """Сколько часов роли реально закрыть инженерами в конкретном спринте, и список (engineer_id, hours)."""
+    """Сколько часов роли реально закрыть инженерами в конкретном спринте, и список (engineer_id, hours).
+
+    change 045: предпочтение своей команды задачи. Сортировка носителей:
+    (1) свой pinned/preferred инженер, (2) инженеры своей команды по свободным часам,
+    (3) заёмные (другие команды) по свободным часам. Заём берётся только когда своих
+    в этом спринте не хватает — не «кто свободнее».
+    """
     holders = [e for e, roles in eng_roles.items() if role in roles]
 
     def _sort_key(eid: str):
         is_pref = 0 if (preferred_engineer_id and eid == preferred_engineer_id) else 1
         free = eng_limits[eid] - eng_used[sprint][eid]
-        return (is_pref, -free, eid)
+        own = 0 if (task_team_id and eng_teams and eng_teams.get(eid) == task_team_id) else 1
+        return (is_pref, own, -free, eid)
 
     holders.sort(key=_sort_key)
     placed = 0.0
@@ -113,14 +122,16 @@ def generate_plan(
     task_by_id = {t.task_id: t for t in data.tasks}
     tasks_in_cycle = set(find_cycle(data.deps, list(task_by_id)))
 
-    # --- инженеры: лимиты, роли; виртуальные держатели ролей без носителей ---
+    # --- инженеры: лимиты, роли, команды; виртуальные держатели ролей без носителей ---
     eng_limits: dict[str, float] = {}
     eng_roles: dict[str, set[str]] = defaultdict(set)
+    eng_teams: dict[str, str] = {}  # change 045: команда инженера — для приоритета своей команды
     orig_roles: dict[str, str] = {}
     for eng in data.engineers:
         eng_limits[eng.engineer_id] = engineer_sprint_limit(eng.capacity_rate)
         normalized_role = _rl(eng.role)
         eng_roles[eng.engineer_id].add(normalized_role)
+        eng_teams[eng.engineer_id] = eng.team_id
         orig_roles[normalized_role] = eng.role
 
     all_roles = {_rl(rl): rl for t in data.tasks for rl in t.role_hours}
@@ -181,7 +192,9 @@ def generate_plan(
                     continue
                 rl = _rl(role_name)
                 got, ass_list = _put_hours(
-                    rl, h_need, pinned_sprint, eng_limits, eng_roles, eng_used, orig_roles, preferred_engineer_id=pinned_eng_id
+                    rl, h_need, pinned_sprint, eng_limits, eng_roles, eng_used, orig_roles,
+                    preferred_engineer_id=pinned_eng_id,
+                    eng_teams=eng_teams, task_team_id=task.team_id,
                 )
                 for eid, h_placed in ass_list:
                     task_assignments.append(Assignment(
@@ -296,7 +309,9 @@ def generate_plan(
                         if need <= 0:
                             continue
                         pref_eid = task_preferred_eng[task_id].get(rl)
-                        got, ass_list = _put_hours(rl, need, sprint, eng_limits, eng_roles, eng_used, orig_roles, preferred_engineer_id=pref_eid)
+                        got, ass_list = _put_hours(rl, need, sprint, eng_limits, eng_roles, eng_used, orig_roles,
+                                                   preferred_engineer_id=pref_eid,
+                                                   eng_teams=eng_teams, task_team_id=task.team_id)
                         placed_hh += got
                         hours_left[rl] -= got
                         role_orig_name = orig_role_names.get(rl, rl)
