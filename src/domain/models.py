@@ -108,6 +108,7 @@ class PlanItem(Explanation):
     pinned_sprint: int | None = None
     pinned_engineer_id: str | None = None
     pinned_position: int | None = None
+    team_id: str = ""  # change 048: команда-исполнитель части (может отличаться от команды задачи)
 
 
 class SprintPlan(BaseModel):

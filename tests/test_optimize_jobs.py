@@ -331,3 +331,54 @@ async def test_optimize_heuristic_after_fact_skips_done_and_past_sprints(auths, 
         items = [t for s in plan.json()["sprints"] for t in s["tasks"]]
         assert "T-1" not in {i["task_id"] for i in items}
         assert all((i["sprint_no"] or 0) >= 2 for i in items)
+
+
+async def _solver_draft_other_team(snapshot: dict) -> dict:
+    """Часть T-1 назначена другой команде (Team-B) — легальный ход solver."""
+    sprints = snapshot["sprints"]
+    assignments = []
+    for task in (t for t in snapshot["tasks"] if t["task_id"] in {"T-1", "T-2"}):
+        assignments.append({
+            "part_id": f"{task['task_id']}#1",
+            "task_id": task["task_id"],
+            "part": 1,
+            "sprint": sprints[0],
+            "team_id": "Team-B" if task["task_id"] == "T-1" else task["team_id"],
+        })
+    return {
+        "assignments": assignments,
+        "staffing_moves": [],
+        "score": {"hard": 0, "soft": 100},
+        "score_breakdown": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_plan_shows_executing_team_not_owner(auths, monkeypatch):
+    """change 048: team_id в ответе плана — команда-исполнитель части;
+    команда-владелец задачи — owner_team_id."""
+    from src.db.session import SessionLocal
+    async with SessionLocal() as session:
+        await _seed_world(session)
+        # Team-B с историей velocity — иначе ступень 2 не может разместить в ней часть
+        await session.execute(delete(TeamHistoryORM).where(TeamHistoryORM.team_id == "Team-B"))
+        session.add(TeamHistoryORM(team_id="Team-B", workspace_id="default",
+                                   snapshot_date=date(2026, 1, 1),
+                                   velocity_achieved=10.0, planned_sp=10.0))
+        await session.commit()
+    monkeypatch.setattr("src.services.optimize_plan.solve_sidecar", _solver_draft_other_team)
+    auth = auths["editor"]
+    plan_id = await _generate_plan(auth)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.post("/api/v1/plans/optimize", headers=auth, json={"plan_id": plan_id})
+        assert r.status_code == 200, r.text
+        new_pid = r.json()["plan_id"]
+
+        plan = await ac.get(f"/api/v1/plans/{new_pid}", headers=auth)
+        items = [t for s in plan.json()["sprints"] for t in s["tasks"]]
+        t1 = next(i for i in items if i["task_id"] == "T-1")
+        assert t1["team_id"] == "Team-B", f"исполнитель части потерян: {t1['team_id']}"
+        assert t1["owner_team_id"] == "Team-A"
+        t2 = next(i for i in items if i["task_id"] == "T-2")
+        assert t2["team_id"] == "Team-A"
+        assert t2["owner_team_id"] == "Team-A"

@@ -121,3 +121,27 @@ def test_presplit_respects_team_sp_capacity():
     assert len(parts) == 2, "атомарная часть SP 10 > 8 не размещается — режем по ёмкости"
     assert all(p["story_points"] <= 8.0 + 0.01 for p in parts)
     assert abs(sum(p["story_points"] for p in parts) - 10.0) < 0.02
+
+
+def test_presplit_small_role_not_fragmented():
+    """change 048: роль 1 ч в задаче на 191 ч не дробится на 3 осколка по 0.33 —
+    уходит целиком в последнюю часть."""
+    snap = _world(_task("T-SM", sp=19.0, hh=191.0,
+                        role_hours={"Разработчик": 190.0, "Девопс": 1.0}))
+    parts = snap["tasks"][0]["parts"]
+    assert len(parts) == 3
+    devops = [p["role_hours"].get("девопс", 0.0) for p in parts]
+    assert devops == [0.0, 0.0, 1.0]
+    dev = [p["role_hours"]["разработчик"] for p in parts]
+    assert abs(sum(dev) - 190.0) < 0.01
+
+
+def test_presplit_role_above_threshold_still_split():
+    """change 048: роль с долей в части ≥ 2 ч дробится пропорционально, как раньше."""
+    snap = _world(_task("T-OK", sp=16.0, hh=160.0,
+                        role_hours={"Разработчик": 150.0, "Тестировщик": 10.0}))
+    parts = snap["tasks"][0]["parts"]
+    assert len(parts) == 2
+    qa = [p["role_hours"]["тестировщик"] for p in parts]
+    assert all(h >= 2.0 for h in qa)
+    assert abs(sum(qa) - 10.0) < 0.01

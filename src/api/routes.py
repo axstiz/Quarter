@@ -127,6 +127,7 @@ def _plan_from_orm(plan_id: str, items: list[PlanItemORM]) -> Plan:
                 pinned_sprint=it.pinned_sprint,
                 pinned_engineer_id=it.pinned_engineer_id,
                 pinned_position=it.pinned_position,
+                team_id=it.team_id or "",
             ))
         else:
             plan.decisions.append(Explanation(
@@ -236,7 +237,10 @@ async def get_plan(plan_id: str, ctx: Context = Depends(require_context)) -> dic
             "estimation_sp": task.estimation_sp if task else 0.0,
             "estimated_hh": task.estimated_hh if task else 0.0,
             "planned_in_sprint": (task.status != "Done") if task else False,
-            "team_id": task.team_id if task else "",
+            # change 048: team_id — команда-исполнитель части (solver может отдать
+            # часть другой команде); команда-владелец задачи — owner_team_id
+            "team_id": i.team_id or (task.team_id if task else ""),
+            "owner_team_id": task.team_id if task else "",
             "role_hours": task.role_hours if task else {},
             "date_forecast": forecast,
         })

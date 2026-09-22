@@ -17,6 +17,7 @@ from src.core.config import settings
 from src.domain.models import CAPACITY_FACTOR, HOURS_PER_SPRINT_FULL, SPRINTS_PER_QUARTER, Engineer, Task, TeamHistory
 
 HOURS_PER_PART = float(HOURS_PER_SPRINT_FULL)  # часть ≤ одного полного лимита спринта
+MIN_ROLE_PART_HOURS = 2.0  # change 048: роль не дробится на части мельче 2 ч — целиком в последнюю часть
 from src.services.bus_factor import compute_bus_factor
 from src.services.capacity import team_capacity_sp
 from src.services.planner import _rl, engineer_sprint_limit
@@ -55,6 +56,9 @@ def _split_parts(sp_total: float, role_hours: dict[str, float],
         k = max(k, min(SPRINTS_PER_QUARTER, math.ceil(sp_total / sp_cap)))
     parts: list[dict] = []
     remaining_hh = total_hh
+    # change 048: мелкие роли (доля в части < MIN_ROLE_PART_HOURS) не дробятся —
+    # уходят целиком в последнюю часть, иначе «роли по задачам» замусорены осколками 0.2–0.9 ч
+    unsplit_roles = {role for role, h in role_hours.items() if 0 < h / k < MIN_ROLE_PART_HOURS}
     for idx in range(1, k + 1):
         if k > hours_chunks:
             # SP-ёмкость расширила k: равномерное деление остатка, чтобы каждая
@@ -63,10 +67,17 @@ def _split_parts(sp_total: float, role_hours: dict[str, float],
         else:
             take = remaining_hh if idx == k else min(HOURS_PER_PART, remaining_hh)
         share = take / total_hh
+        part_roles = {}
+        for role, h in role_hours.items():
+            if role in unsplit_roles:
+                if idx == k:
+                    part_roles[role] = h
+            else:
+                part_roles[role] = round(h * share, 2)
         parts.append({
             "part": idx,
             "story_points": round(sp_total * share, 2),
-            "role_hours": {role: round(h * share, 2) for role, h in role_hours.items()},
+            "role_hours": part_roles,
         })
         remaining_hh = round(remaining_hh - take, 2)
     return parts
