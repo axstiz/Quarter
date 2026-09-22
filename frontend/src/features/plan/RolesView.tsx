@@ -19,6 +19,10 @@ interface Props {
   readOnly: boolean
   selectedId: string | null
   onSelect: (taskId: string) => void
+  // change 038: оптимистичный слой пинов
+  pendingMoves?: Record<string, number>
+  onPendingMove?: (taskId: string, sprintNo: number) => void
+  onPendingReset?: () => void
 }
 
 interface DragState {
@@ -42,7 +46,7 @@ interface HoverCard {
 
 const chipId = (chip: RoleChip) => `${chip.taskId}:${chip.sprintNo}:${chip.part}`
 
-export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, onSelect }: Props) {
+export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, onSelect, pendingMoves = {}, onPendingMove, onPendingReset }: Props) {
   const [team, setTeam] = useParam('team')
   const [q, setQ] = useParam('q')
   const engineers = useEngineers({})
@@ -171,9 +175,12 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
     pin.mutate(
       { taskId: current.chip.taskId, sprintNo: target },
       {
-        // change 032: пин — намерение, пересборка не выполняется немедленно;
-        // расстановка обновится при «Пересчёте»/факте (pre-occupancy 016)
-        onSuccess: () => setFeedback({ text: `${current.chip.taskId} закреплена за спринтом ${target} (ожидает пересчёт)`, pinnedPending: true }),
+        // change 032/038: пин — намерение без немедленной пересборки;
+        // optimistic слой показывает чип в целевой колонке с бейджем «пин»
+        onSuccess: () => {
+          onPendingMove?.(current.chip.taskId, target)
+          setFeedback({ text: `${current.chip.taskId} закреплена за спринтом ${target} (ожидает пересчёт)`, pinnedPending: true })
+        },
         onError: (e) => {
           // 409 (конфликт ёмкости/зависимости) и прочие ошибки: без повторов на ту же цель
           setFailedPins((before) => [...before, `${current.chip.taskId}:${target}`])
@@ -189,7 +196,8 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
     const move = lastMove
     setLastMove(null)
     unpin.mutate(move.chip.taskId, {
-      onSuccess: () => setFeedback({ text: `${move.chip.taskId} возвращено: закрепление снято` }),
+      // change 038: снимаем optimistic слой — чип возвращается к серверной раскладке
+      onSuccess: () => { onPendingReset?.(); setFeedback({ text: `${move.chip.taskId} возвращено: закрепление снято` }) },
       onError: (e) => setFeedback({ text: `${move.chip.taskId}: ${errorTitle(e)}`, error: true }),
     })
   }
@@ -351,6 +359,7 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
                                     onMouseLeave={() => setHover(null)}
                                   >
                                     <span className="roles__chip-id">{chip.taskId}</span>
+                                    {pendingMoves[chip.taskId] != null && <span className="roles__chip-pin" title="закреплено (ожидает пересчёт)">пин</span>}
                                     <small>{fmt(chip.hours)} ч{chip.parts > 1 ? ` · ${chip.part}/${chip.parts}` : ''}</small>
                                   </button>
                                 ))}
