@@ -8,6 +8,7 @@ import { api } from '@/api/endpoints'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useBusFactor, useCurrentPlanId, useFacts, useGeneratePlan, useOptimizePlan, usePlan, usePlanBusRisk, usePlanVersions, useTasks } from '@/api/queries'
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber'
+import { BusyVeil } from '@/components/ui/BusyVeil'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Empty, ErrorAlert, errorHint, errorTitle, SkeletonRows } from '@/components/ui/States'
@@ -46,6 +47,13 @@ export function PlanPage() {
   const optimize = useOptimizePlan(planId ?? '')
   const qc = useQueryClient()
   const [confirmGenerate, setConfirmGenerate] = useState(false)
+  // change 034: вуаль «идёт перестройка» — busy весь solve (031 polling держит флаг до терминала)
+  const planBusy = Boolean(optimize.isPending || generate.isPending)
+  const planBusyStatus = optimize.isPending
+    ? (optimize.pollStatus === 'queued' ? 'Оптимизация: задача в очереди (solver)…'
+      : optimize.pollStatus === 'solving' ? 'Solver перестраивает расстановку…'
+        : 'Оптимизация плана…')
+    : generate.isPending ? 'Строим план заново…' : null
   const demoImport = useMutation({
     mutationFn: api.importDemo,
     onSuccess: (r) => {
@@ -169,7 +177,8 @@ export function PlanPage() {
   }
 
   return (
-    <div className="page" data-panel={panelKey && !overlay ? 'open' : 'closed'}>
+    <div className="page" data-panel={panelKey && !overlay ? 'open' : 'closed'} data-busy={planBusy ? '1' : undefined}>
+      <BusyVeil active={planBusy} status={planBusyStatus} />
       <div className="content">
         <div className="page-head">
           <div>

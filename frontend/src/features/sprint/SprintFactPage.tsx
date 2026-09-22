@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { canEdit, getRole } from '@/api/auth'
 import { useCurrentPlanId, useFacts, usePlan, usePlanVersions, useRecompute, useSubmitFact, useTasks } from '@/api/queries'
 import type { PlanRow } from '@/lib/planModel'
+import { BusyVeil } from '@/components/ui/BusyVeil'
 import { buildPlanModel } from '@/lib/planModel'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -70,7 +71,13 @@ export function SprintFactPage() {
       onError: (e) => toast.error(errorTitle(e), { description: errorHint(e) }),
     })
 
+  // change 034: вуаль на время факта/пересчёта
+  const busy = Boolean(recompute.isPending)
+  const busyStatus = recompute.isPending ? 'Пересчёт оставшихся спринтов…' : null
+
   return (
+    <div className="page" data-busy={busy ? '1' : undefined}>
+      <BusyVeil active={busy} status={busyStatus} />
     <div className="content">
       <div className="page-head">
         <div>
@@ -131,6 +138,7 @@ export function SprintFactPage() {
           )}
         </>
       )}
+    </div>
     </div>
   )
 }

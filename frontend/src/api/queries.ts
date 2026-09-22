@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { getWorkspaceId, setWorkspace } from './auth'
@@ -169,9 +170,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export function useOptimizePlan(planId: string) {
   const invalidate = useInvalidatePlans()
-  return useMutation({
+  const [pollStatus, setPollStatus] = useState<'queued' | 'solving' | 'ready' | 'failed' | null>(null)
+  const mutation = useMutation({
     mutationFn: async () => {
       const started = await api.optimizePlan(planId)
+      setPollStatus('queued')
       const deadline = Date.now() + OPTIMIZE_POLL_LIMIT_MS
       let job = await api.getOptimizeJob(started.job_id)
       while (job.status !== 'ready' && job.status !== 'failed') {
@@ -180,11 +183,14 @@ export function useOptimizePlan(planId: string) {
         }
         await sleep(OPTIMIZE_POLL_MS)
         job = await api.getOptimizeJob(started.job_id)
+        setPollStatus(job.status)
       }
       return { started, job }
     },
+    onSettled: () => setPollStatus(null),
     onSuccess: invalidate,
   })
+  return { ...mutation, pollStatus }
 }
 
 export function useSetPriorities() {
