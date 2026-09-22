@@ -267,3 +267,20 @@ class StaffingMoveORM(Base):
     engineer_id: Mapped[str] = mapped_column(String)
     from_team_id: Mapped[str] = mapped_column(String)
     to_team_id: Mapped[str] = mapped_column(String)
+
+
+class AdviceReportORM(Base):
+    """change 043: история прогонов AI-советника с версией плана и комментарием.
+
+    Комментарий сохраняется (решение лида, спека planning change 043 — отменяет
+    «никогда не сохраняется» из change 015). Версия плана — plan_id (uuid версии).
+    """
+    __tablename__ = "advice_reports"
+    advice_id: Mapped[str] = mapped_column(String, primary_key=True, default=_uid)
+    workspace_id: Mapped[str] = mapped_column(String, default="default", index=True)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.plan_id"), index=True)
+    mode: Mapped[str] = mapped_column(String, default="fallback")  # llm|fallback
+    advice: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
+    comment: Mapped[str] = mapped_column(String, default="")  # ≤500, теперь сохраняется
+    comment_considered: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(), server_default=func.now())
