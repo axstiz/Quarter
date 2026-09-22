@@ -16,6 +16,8 @@ export interface PlanTask {
   estimated_hh: number
   planned_in_sprint: boolean
   team_id: string
+  /** change 048: команда-владелец задачи (team_id — исполнитель части, может отличаться) */
+  owner_team_id?: string
   role_hours: Record<string, number>
   /** pin (016): закрепление задачи за спринтом/носителем — сервер пересобирает план */
   pinned_sprint?: number | null

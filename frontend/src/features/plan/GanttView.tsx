@@ -56,7 +56,8 @@ export function GanttView({ model, planRisk, factSprintOf, selectedId, onSelect 
   // задачи плана с единственным носителем роли — из ручки GET /plans/{id}/bus-risk (020-гейта)
   const riskById = useMemo(() => new Set((planRisk?.tasks ?? []).map((t) => t.task_id)), [planRisk])
   const all = [...model.tasks.values()]
-  const teams = [...new Set(all.map((task) => task.team_id).filter(Boolean))].sort()
+  // change 049: команды-исполнители всех частей (cross-team задача видна у каждого исполнителя)
+  const teams = [...new Set(all.flatMap((task) => task.exec_teams.length ? task.exec_teams : [task.team_id]).filter(Boolean))].sort()
   const teamDetails = useTeamDetails(teams)
   const capacityByTeam = new Map(teamDetails.map((result, index) => [teams[index], result.data]))
 
@@ -69,16 +70,18 @@ export function GanttView({ model, planRisk, factSprintOf, selectedId, onSelect 
   const query = (q ?? '').trim().toLowerCase()
   const filtered = !!(team || decision || query || onlyRisk)
   const matches = (task: TaskSummary) =>
-    (!team || task.team_id === team) &&
+    (!team || (task.exec_teams.length ? task.exec_teams : [task.team_id]).includes(team)) &&
     (!decision || task.decision === decision) &&
     (!onlyRisk || riskById.has(task.task_id)) &&
     (!query || `${task.task_id} ${task.summary} ${task.parent_id ?? ''}`.toLowerCase().includes(query))
 
-  const keyOf = (task: TaskSummary) => (groupBy === 'team' ? task.team_id : (task.parent_id ?? NO_INITIATIVE))
+  // change 049: при группировке по командам задача входит во все группы своих исполнителей
+  const keysOf = (task: TaskSummary): string[] =>
+    groupBy === 'team' ? (task.exec_teams.length ? task.exec_teams : [task.team_id]) : [task.parent_id ?? NO_INITIATIVE]
   const firstSprint = (task: TaskSummary) => sprintsOf(task)[0] ?? 99
-  const groups = [...new Set(all.map(keyOf))]
+  const groups = [...new Set(all.flatMap(keysOf))]
     .map((id) => {
-      const members = all.filter((task) => keyOf(task) === id)
+      const members = all.filter((task) => keysOf(task).includes(id))
       const items = members.filter(matches).sort((a, b) => firstSprint(a) - firstSprint(b) || a.task_id.localeCompare(b.task_id))
       return { id, members, items, start: Math.min(...members.map(firstSprint)) }
     })
@@ -179,7 +182,7 @@ export function GanttView({ model, planRisk, factSprintOf, selectedId, onSelect 
                         </button>
                         <div className="gantt__task-meta">
                           {task.decision !== 'planned' && <DecisionBadge decision={task.decision} />}
-                          {groupBy === 'initiative' ? <span>{task.team_id}</span> : task.parent_id && <span className="mono">{task.parent_id}</span>}
+                          {groupBy === 'initiative' ? <span>{(task.exec_teams.length ? task.exec_teams : [task.team_id]).join(' · ')}</span> : task.parent_id && <span className="mono">{task.parent_id}</span>}
                           {risk && <span className="gantt__risk" title="Риск Bus Factor: роль задачи держится на одном человеке"><ShieldAlert aria-label="Риск Bus Factor" /></span>}
                         </div>
                       </div>

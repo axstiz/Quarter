@@ -88,6 +88,18 @@ export function TaskPanelContent({ model, planId, taskId, tasksInfo, busFactor, 
         </dd>
         <dt>Команда</dt>
         <dd>{task?.team_id ?? info?.team_id}</dd>
+        {task && (() => {
+          // change 049: владелец задачи ≠ исполнитель части (cross-team назначение solver)
+          const owner = task.rows.find((r) => r.owner_team_id)?.owner_team_id
+          const execs = task.exec_teams.length ? task.exec_teams : [task.team_id]
+          if (!owner || (execs.length === 1 && execs[0] === owner)) return null
+          return (
+            <>
+              <dt>Исполнители</dt>
+              <dd>{owner} → {execs.join(' · ')}</dd>
+            </>
+          )
+        })()}
         <dt>Инициатива</dt>
         <dd className="mono">{task?.parent_id ?? info?.parent_id ?? '—'}</dd>
       </dl>

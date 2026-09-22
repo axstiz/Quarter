@@ -16,6 +16,8 @@ export interface TaskSummary {
   estimation_sp: number
   estimated_hh: number
   role_hours: Record<string, number>
+  /** change 049: все команды-исполнители частей задачи (solver может отдать части разным командам) */
+  exec_teams: string[]
   /** Итоговое решение по задаче в этой версии плана */
   decision: Decision
   /** Самая содержательная причина из всех частей */
@@ -89,12 +91,14 @@ export function buildPlanModel(plan: Plan, tasksInfo: TaskInfo[]): PlanModel {
         tasks.set(r.task_id, {
           task_id: r.task_id, summary: r.summary, team_id: r.team_id, parent_id: r.parent_id, estimation_sp: r.estimation_sp,
           estimated_hh: r.estimated_hh, role_hours: r.role_hours, decision: r.decision, reason: r.reason,
-          sprints: [s.sprint_no], plannedSp: r.step_points_sp ?? 0, rows: [r],
+          sprints: [s.sprint_no], plannedSp: r.step_points_sp ?? 0, rows: [r], exec_teams: [],
         })
       }
     }
   }
   for (const t of tasks.values()) {
+    t.exec_teams = [...new Set(t.rows.map((r) => r.team_id).filter(Boolean))]
+    if (!t.exec_teams.length && t.team_id) t.exec_teams = [t.team_id]
     t.decision = t.rows.every((r) => r.decision === 'done_actual') ? 'done_actual' : t.rows.find((r) => r.decision !== 'done_actual')!.decision
     // «разбита между спринтами» — служебная пометка части, для задачи в целом неинформативна
     const meaningful = t.rows.map((r) => r.reason).find((x) => x && x !== 'разбита между спринтами')
@@ -107,6 +111,7 @@ export function buildPlanModel(plan: Plan, tasksInfo: TaskInfo[]): PlanModel {
     const summary: TaskSummary = {
       task_id: e.task_id, summary: base.summary, team_id: base.team_id, parent_id: base.parent_id, estimation_sp: base.estimation_sp,
       estimated_hh: base.estimated_hh, role_hours: base.role_hours, decision: e.decision, reason: e.reason, sprints: [], plannedSp: 0, rows: [],
+      exec_teams: base.team_id ? [base.team_id] : [],
     }
     if (!tasks.has(e.task_id)) tasks.set(e.task_id, summary)
     outside.push(summary)

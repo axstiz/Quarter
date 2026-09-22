@@ -77,19 +77,20 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
   const capacityByTeam = new Map(roleModel.teams.map((bucket, index) => [bucket.teamId, teamDetails[index].data?.capacity_sp_per_sprint]))
 
   // Мини-статистика команды по спринтам: SP задач команды (без выполненных по факту) в показываемом спринте
+  // change 049: SP атрибутируется команде-исполнителю каждой части (row.team_id), не первой части задачи
   const teamStats = useMemo(() => {
     const map = new Map<string, Map<number, { sp: number; count: number }>>()
     for (const s of model.sprints) {
       for (const row of s.rows) {
-        const task = model.tasks.get(row.task_id)
-        if (!task || row.sprint_no == null) continue
-        const bySprint = map.get(task.team_id) ?? new Map<number, { sp: number; count: number }>()
+        const rowTeam = row.team_id || model.tasks.get(row.task_id)?.team_id
+        if (!rowTeam || row.sprint_no == null) continue
+        const bySprint = map.get(rowTeam) ?? new Map<number, { sp: number; count: number }>()
         const cur = bySprint.get(row.sprint_no) ?? { sp: 0, count: 0 }
         bySprint.set(row.sprint_no, {
           sp: cur.sp + (row.decision !== 'done_actual' ? (row.step_points_sp ?? 0) : 0),
           count: cur.count + 1,
         })
-        map.set(task.team_id, bySprint)
+        map.set(rowTeam, bySprint)
       }
     }
     return map
