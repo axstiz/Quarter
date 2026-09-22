@@ -4,6 +4,15 @@ import type { AuthRole } from './auth'
 
 export type Decision = 'planned' | 'postponed' | 'cancelled' | 'cancelled_pending' | 'done_actual'
 
+export interface PlanAssignment {
+  task_id: string
+  role: string
+  engineer_id: string
+  sprint_no: number
+  hours: number
+  is_pinned?: boolean
+}
+
 export interface PlanTask {
   task_id: string
   decision: Decision
@@ -18,6 +27,8 @@ export interface PlanTask {
   team_id: string
   /** change 048: команда-владелец задачи (team_id — исполнитель части, может отличаться) */
   owner_team_id?: string
+  /** change 050: реальные назначения бэкенда (инженер × роль × часы) — источник для «Ролей по спринтам» */
+  assignments?: PlanAssignment[]
   role_hours: Record<string, number>
   /** pin (016): закрепление задачи за спринтом/носителем — сервер пересобирает план */
   pinned_sprint?: number | null
