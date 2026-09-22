@@ -41,6 +41,9 @@ services:
       POSTCODE_JOBS_MODE: queue
       # change 028: воркер исполняет прогон solver'а (run_optimization_job)
       POSTCODE_OPTIMIZER_BASE_URL: http://optimizer:8080
+    volumes:
+      # change 030: русский CA Минцифры для LLM-вызовов нормализации из воркера
+      - /etc/nixos/certs:/etc/nixos/certs:ro
 
   # change 018: solver-сайдкар Timefold — только в профиле optimizer
   # (docker compose --profile optimizer up)
@@ -84,6 +87,10 @@ services:
       # очередь тяжёлых операций (change 028): solver/LLM через arq; redis в профиле jobs,
       # недоступность — деградация в синхронный режим
       POSTCODE_REDIS_URL: redis://redis:6379/0
+    volumes:
+      # change 030: русский CA Минцифры на хосте — до LLM-вызовов SDK из контейнера
+      # (GIGACHAT_CA_BUNDLE в .env указывает на тот же путь)
+      - /etc/nixos/certs:/etc/nixos/certs:ro
     restart: unless-stopped
 
   frontend:

@@ -97,3 +97,18 @@ async def test_fallback_advice_builder():
     assert "sprint_priority" in kinds
     for a in out:
         assert a.numeric_basis and a.expected_effect
+
+
+@pytest.mark.asyncio
+async def test_bad_ca_bundle_degrades_not_500(monkeypatch):
+    """change 030: кривой GIGACHAT_CA_BUNDLE → GigaUnavailable (fallback, не 500)."""
+    from src.ai.gigachat import GigaChatClient
+
+    monkeypatch.setenv("GIGACHAT_CLIENT_SECRET", "Base64:FAKE")
+    monkeypatch.setenv("GIGACHAT_CA_BUNDLE", "/nonexistent/ca.pem")
+    c = GigaChatClient(client_id=None, base_url=None)
+    import pytest
+    from src.ai.llm import LLMUnavailable
+
+    with pytest.raises(LLMUnavailable, match="LLM недоступен"):
+        c.complete("s", "u")

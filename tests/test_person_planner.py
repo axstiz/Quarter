@@ -144,3 +144,43 @@ async def test_pdf_case_db202_single_net_holder_splits_two_sprints(auth):
             if any(i["task_id"] == "DB-202" and i["role"] == "Разработчик .net" for i in items)
         }
         assert person_sprints == sprints
+
+
+@pytest.mark.asyncio
+async def test_pin_defers_rebuild_and_recompute_applies(auth):
+    """change 032: POST pin НЕ пересобирает план немедленно; пересчёт применяет пин."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/api/v1/data/import", headers=auth)
+        plan_res = await client.post("/api/v1/plans/generate", json={"strategy": "priority"}, headers=auth)
+        plan_id = plan_res.json()["plan_id"]
+
+        plan = (await client.get(f"/api/v1/plans/{plan_id}", headers=auth)).json()
+        planned = [(t["task_id"], s["sprint_no"]) for s in plan["sprints"] for t in s["tasks"]]
+        assert planned, "пустой план"
+        tid = planned[0][0]
+        sprints_before = {tid_: s_ for tid_, s_ in planned}
+        target = max(sprints_before.values())
+
+        p = await client.post(f"/api/v1/plans/{plan_id}/tasks/{tid}/pin",
+                              json={"sprint_no": target}, headers=auth)
+        assert p.status_code == 200, p.text
+        assert p.json()["applied"] is False and "ожидает пересчёт" in p.json()["message"]
+
+        # соседние задачи не сдвинулись: ручки версий не прибавилось с пересборкой
+        versions = (await client.get("/api/v1/plans", headers=auth)).json()
+        assert sum(1 for v in versions if v.get("parent_plan_id") == plan_id) == 0, \
+            "pin не должен создавать child-версию"
+
+        rec = await client.post(f"/api/v1/plans/{plan_id}/recompute", headers=auth)
+        assert rec.status_code == 200, rec.text
+        new_id = rec.json()["new_plan_id"]
+        assert new_id != plan_id
+
+        new_plan = (await client.get(f"/api/v1/plans/{new_id}", headers=auth)).json()
+        onk = next((t for s in new_plan["sprints"] for t in s["tasks"] if t["task_id"] == tid), None)
+        assert onk is not None, "закреплённая задача не появилась в плане после пересчёта"
+        assert onk["sprint_no"] == target, \
+            f"пин не применён: {tid} в спринт {onk['sprint_no']}, ожидался {target}"
+
+        unpin = await client.delete(f"/api/v1/plans/{plan_id}/tasks/{tid}/pin", headers=auth)
+        assert unpin.status_code == 200, unpin.text

@@ -154,19 +154,33 @@ export function useSubmitFact(planId: string) {
 
 export function useRecompute(planId: string) {
   const invalidate = useInvalidatePlans()
-  return useMutation({ mutationFn: (afterSprint: number) => api.recompute(planId, afterSprint), onSuccess: invalidate })
+  return useMutation({ mutationFn: (afterSprint?: number) => api.recompute(planId, afterSprint ?? 0), onSuccess: invalidate })
 }
 
 /**
  * Оптимизация версии: POST создаёт новую версию (solver или эвристика),
- * затем дочитываем job — в тост нужны переносы людей и режим из отчёта.
+ * change 031: job из очереди опрашивается до терминального статуса
+ * (ready|failed) с интервалом 2 c — кнопка остаётся busy весь solve.
  */
+const OPTIMIZE_POLL_MS = 2000
+const OPTIMIZE_POLL_LIMIT_MS = 3_120_000 // 52 мин > arq job_timeout 300 с — сторож для вечного pollа
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
 export function useOptimizePlan(planId: string) {
   const invalidate = useInvalidatePlans()
   return useMutation({
     mutationFn: async () => {
       const started = await api.optimizePlan(planId)
-      const job = await api.getOptimizeJob(started.job_id)
+      const deadline = Date.now() + OPTIMIZE_POLL_LIMIT_MS
+      let job = await api.getOptimizeJob(started.job_id)
+      while (job.status !== 'ready' && job.status !== 'failed') {
+        if (Date.now() > deadline) {
+          throw new Error('Solver не уложился в бюджет ожидания — проверьте статус задачи позже (GET /plans/optimize/{job_id})')
+        }
+        await sleep(OPTIMIZE_POLL_MS)
+        job = await api.getOptimizeJob(started.job_id)
+      }
       return { started, job }
     },
     onSuccess: invalidate,
