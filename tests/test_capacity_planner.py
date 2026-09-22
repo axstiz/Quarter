@@ -168,3 +168,51 @@ def test_loan_only_when_own_exhausted():
     eng_used = {a.engineer_id for a in ass}
     assert "E-A" in eng_used, "свой носитель должен использоваться"
     assert "E-B" in eng_used, "займ допустим когда своих не хватает"
+
+
+def test_loan_single_donor_team():
+    """change 046: займ берётся из одной донорской команды с максимальным
+    суммарным свободным лимитом, а не россыпью по всем."""
+    from src.services.planner import _put_hours
+
+    eng_limits = {"E-A": 0.0, "E-B1": 80.0, "E-B2": 80.0, "E-C1": 40.0, "E-D1": 30.0}
+    eng_roles = {e: {"Тестировщик"} for e in eng_limits}
+    eng_used = {1: {e: 0.0 for e in eng_limits}}
+    eng_teams = {"E-A": "Team-A", "E-B1": "Team-B", "E-B2": "Team-B",
+                 "E-C1": "Team-C", "E-D1": "Team-D"}
+    placed, ass = _put_hours("Тестировщик", 100.0, 1, eng_limits, eng_roles,
+                             eng_used, {}, eng_teams=eng_teams, task_team_id="Team-A")
+    teams_used = {eng_teams[e] for e, _ in ass}
+    assert placed == 100.0
+    assert teams_used == {"Team-B"}, f"займ должен идти из одной донорской (макс. лимит): {ass}"
+
+
+def test_loan_second_donor_when_first_insufficient():
+    """change 046: если первой донорской не хватает — вторая запасная, третья не берётся."""
+    from src.services.planner import _put_hours
+
+    eng_limits = {"E-A": 0.0, "E-B1": 60.0, "E-C1": 50.0, "E-D1": 40.0}
+    eng_roles = {e: {"Тестировщик"} for e in eng_limits}
+    eng_used = {1: {e: 0.0 for e in eng_limits}}
+    eng_teams = {"E-A": "Team-A", "E-B1": "Team-B", "E-C1": "Team-C", "E-D1": "Team-D"}
+    placed, ass = _put_hours("Тестировщик", 100.0, 1, eng_limits, eng_roles,
+                             eng_used, {}, eng_teams=eng_teams, task_team_id="Team-A")
+    teams_used = {eng_teams[e] for e, _ in ass}
+    assert placed == 100.0
+    assert teams_used == {"Team-B", "Team-C"}, f"донорские 1-я + запасная 2-я, без 3-й: {ass}"
+
+
+def test_loan_deferred_when_two_donors_insufficient():
+    """change 046: если двух донорских не хватает — остаток откладывается
+    (caller переносит в следующий спринт), третья команда не трогается."""
+    from src.services.planner import _put_hours
+
+    eng_limits = {"E-A": 0.0, "E-B1": 60.0, "E-C1": 50.0, "E-D1": 40.0}
+    eng_roles = {e: {"Тестировщик"} for e in eng_limits}
+    eng_used = {1: {e: 0.0 for e in eng_limits}}
+    eng_teams = {"E-A": "Team-A", "E-B1": "Team-B", "E-C1": "Team-C", "E-D1": "Team-D"}
+    placed, ass = _put_hours("Тестировщик", 150.0, 1, eng_limits, eng_roles,
+                             eng_used, {}, eng_teams=eng_teams, task_team_id="Team-A")
+    teams_used = {eng_teams[e] for e, _ in ass}
+    assert placed == 110.0, f"только 60+50, остаток 40 — отложка: {placed}"
+    assert "Team-D" not in teams_used, f"третья донорская не берётся: {ass}"

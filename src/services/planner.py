@@ -90,11 +90,28 @@ def _put_hours(
     """
     holders = [e for e, roles in eng_roles.items() if role in roles]
 
+    # change 046: займ из одной донорской команды (макс. суммарный свободный лимит
+    # роли в этом спринте), вторая запасная, дальше — отложка в следующий спринт
+    donor_free: dict[str, float] = defaultdict(float)
+    if eng_teams and task_team_id:
+        for eid in holders:
+            team = eng_teams.get(eid)
+            if team and team != task_team_id:
+                donor_free[team] += max(0.0, eng_limits[eid] - eng_used[sprint][eid])
+    donor_order = sorted(donor_free, key=lambda t: (-donor_free[t], t))[:2]  # только 1-я и запасная 2-я
+    donor_rank = {team: i for i, team in enumerate(donor_order)}
+
     def _sort_key(eid: str):
         is_pref = 0 if (preferred_engineer_id and eid == preferred_engineer_id) else 1
         free = eng_limits[eid] - eng_used[sprint][eid]
         own = 0 if (task_team_id and eng_teams and eng_teams.get(eid) == task_team_id) else 1
-        return (is_pref, own, -free, eid)
+        team = (eng_teams or {}).get(eid)
+        if own == 1:
+            # заёмный: только донорская 1-я (rank 0) или запасная 2-я (rank 1); остальные не берём
+            donor = donor_rank.get(team, 9)
+        else:
+            donor = 0
+        return (is_pref, own, donor, -free, eid)
 
     holders.sort(key=_sort_key)
     placed = 0.0
@@ -102,6 +119,13 @@ def _put_hours(
     for eid in holders:
         if placed >= hours:
             break
+        # change 046: заёмный не из донорской 1-2 не берётся — отложка (caller идёт в след. спринт)
+        team = (eng_teams or {}).get(eid)
+        if (
+            eng_teams and task_team_id and team and team != task_team_id
+            and eid != preferred_engineer_id and donor_rank.get(team, 9) > 1
+        ):
+            continue
         free = eng_limits[eid] - eng_used[sprint][eid]
         if free <= 0:
             continue
