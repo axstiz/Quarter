@@ -94,18 +94,15 @@ export function PlanPage() {
     optimize.mutate(undefined, {
       onSuccess: ({ started, job }) => {
         setPlanParam(started.plan_id)
-        const moves = job.staffing_moves.length
-        const modeLabel = started.mode === 'solver' ? 'solver Timefold' : 'эвристика (сайдкар недоступен)'
-        const reason = job.report?.degradation_reason
-        const degraded = started.mode !== 'solver'
-        toast.success(degraded ? 'План построен эвристикой' : 'План оптимизирован', {
-          description: [
-            `Режим: ${modeLabel}.`,
-            degraded && reason && 'solver не уложился в бюджет — можно перезапустить.',
-            reason ? `Причина: ${reason}.` : '',
-            moves ? ` Переносов людей: ${moves}.` : '',
-            ' Открыта новая версия — откат через селектор версий.',
-          ].filter(Boolean).join(' '),
+        // change 031: терминальный статус job'а — режим и причина деградации честные
+        const moves = job.staffing_moves?.length ?? 0
+        const modeLabel = started.mode === 'solver' ? 'solver Timefold' : 'эвристика' + (started.report?.degradation_reason ? ` (${started.report.degradation_reason})` : '')
+        if (job.status === 'failed') {
+          toast.error('Оптимизация не удалась', { description: job.error ?? undefined })
+          return
+        }
+        toast.success(started.mode === 'solver' ? 'План оптимизирован' : 'План построен эвристикой', {
+          description: `Режим: ${modeLabel}.${moves ? ` Переносов людей: ${moves}.` : ''} Открыта новая версия — откат через селектор версий.`,
         })
       },
       onError: (e) => {

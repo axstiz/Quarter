@@ -81,10 +81,13 @@ export interface RecomputeResponse {
 
 /** POST /plans/optimize — job выполняется синхронно, ответ уже финальный. */
 export interface OptimizeStartResponse {
-  status: 'ready'
+  /** change 028: очередь возвращает queued (решение в GET job), sync-режим — (...) ready */
+  status: 'queued' | 'ready' | 'failed'
   job_id: string
-  plan_id: string
-  mode: 'solver' | 'heuristic'
+  plan_id: string | null
+  mode: 'solver' | 'heuristic' | null
+  /** только sync-режим (queued-ответ тела отчёта не содержит) */
+  report?: OptimizeJob['report']
 }
 
 export interface StaffingMove {

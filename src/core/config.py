@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     class Config:
         env_prefix = "POSTCODE_"
         env_file = ".env"
+        # .env содержит и не-POSTCODE_ ключи (GIGACHAT_*, LLM SDK/скрипты) —
+        # игнорируем их, не валидируем как поля настроек
+        extra = "ignore"
 
 
 settings = Settings()

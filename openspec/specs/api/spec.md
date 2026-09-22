@@ -76,12 +76,24 @@ API SHALL предоставлять: POST /data/upload (загрузка фай
 
 ### Requirement: AI-слой
 
-AI-пайплайны SHALL жить в src/ai (LangGraph-графы, клиент провайдера, JSON-схемы); вызовы LLM always через pydantic-валидацию; клиент GigaChat конфигурируется env-ом, отсутствие ключа ≤ пласт деградации (шаблонные маппинги).
+AI-пайплайны SHALL жить в src/ai (LangGraph-графы, клиент провайдера, JSON-схемы); вызовы LLM всегда через pydantic-валидацию; клиент GigaChat конфигурируется env-ом, отсутствие ключа ≤ слой деградации (шаблонные маппинги). Ошибка инициализации SDK (недоступный/неверный CA-бандл и т.п.) SHALL превращаться в деградацию fallback (advice 200, mode=fallback), а не 500.
 
 #### Scenario: Новая AI-фича
 
 - **WHEN** добавляется AI-советник (change 003+)
 - **THEN** он реализуется новым графом в src/ai/pipelines с общей обёрткой провайдера
+
+#### Scenario: CA-бандл недоступен
+
+- **GIVEN** GIGACHAT_CA_BUNDLE указывает на файл, которого нет в контейнере
+- **WHEN** GET /plans/{id}/advice
+- **THEN** 200, mode=fallback (советы детерминированные), не 500
+
+#### Scenario: LLM-режим при валидном бандле
+
+- **GIVEN** CA-бандл смонтирован и валиден
+- **WHEN** GET /plans/{id}/advice
+- **THEN** mode=llm при живом ключе GigaChat
 
 ### Requirement: Ручки приоритета и отмены
 
@@ -183,6 +195,7 @@ API SHALL предоставлять `GET /teams/{team_id}/bus-factor`: расч
 - **THEN** 200: items только области team=Team-K, methodology присутствует; 404 для несуществующей команды
 
 <<<<<<< ours
+
 ### Requirement: Назначения и личный план в API
 
 Ответ `GET /plans/{plan_id}` SHALL дополнительно включать назначения (`engineer_id`, `role`) в каждой запланированной части задачи. API SHALL предоставлять `GET /plans/{plan_id}/people/{engineer_id}` — личный план: последовательные спринты с упорядоченным списком назначений (закреплённые помечены); ручки закрепления: POST /plans/{plan_id}/tasks/{task_id}/pin `{sprint_no, engineer_id?}` и DELETE .../pin (unpin); незакреплённый порядок MAY закрепляться через pin отдельных позиций личной очереди. Несуществующие план/инженер — 404.
