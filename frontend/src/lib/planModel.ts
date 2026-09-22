@@ -66,7 +66,7 @@ export function buildPlanModel(plan: Plan, tasksInfo: TaskInfo[]): PlanModel {
     }
   }
 
-  // одна строка на (задача × спринт): оптимизатор может положить две части задачи в один спринт
+  // одна строка на (задача × спринт × исполнитель): оптимизатор может положить две части задачи в один спринт
   for (const n of SPRINT_NUMBERS) bySprint.set(n, mergeSameTask(bySprint.get(n)!))
 
   // нумерация частей задачи по спринтам
@@ -123,16 +123,22 @@ export function buildPlanModel(plan: Plan, tasksInfo: TaskInfo[]): PlanModel {
   return { sprints, outside, tasks }
 }
 
-/** Схлопывает строки одной задачи внутри спринта: SP суммируются, факт побеждает, причина — первая непустая. */
+/** Схлопывает строки одной задачи внутри спринта: SP суммируются, факт побеждает, причина — первая непустая.
+ *  Сливаются только строки одной команды-исполнителя (task_id × team_id): у разных
+ *  исполнителей строки остаются раздельными — иначе SP приписывался бы не той команде
+ *  (048). Назначения (assignments) конкатенируются — чипы «Ролей по спринтам» (050)
+ *  строятся из них и не должны терять часы сливаемых строк. */
 function mergeSameTask(rows: PlanTask[]): PlanTask[] {
   const byTask = new Map<string, PlanTask>()
   for (const r of rows) {
-    const cur = byTask.get(r.task_id)
-    if (!cur) { byTask.set(r.task_id, { ...r }); continue }
+    const key = `${r.task_id}::${r.team_id}`
+    const cur = byTask.get(key)
+    if (!cur) { byTask.set(key, { ...r }); continue }
     if (r.step_points_sp != null) cur.step_points_sp = (cur.step_points_sp ?? 0) + r.step_points_sp
     if (r.decision === 'done_actual') cur.decision = 'done_actual'
     if (!cur.reason && r.reason) cur.reason = r.reason
     if (cur.pinned_sprint == null && r.pinned_sprint != null) cur.pinned_sprint = r.pinned_sprint
+    if (cur.assignments || r.assignments) cur.assignments = [...(cur.assignments ?? []), ...(r.assignments ?? [])]
   }
   return [...byTask.values()]
 }

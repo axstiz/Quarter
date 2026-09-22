@@ -1449,31 +1449,36 @@ async def pin_task(
                 detail=f"нужно {need:.0f} ч, свободно {max(0.0, limit - placed):.0f} ч — инженер {body.engineer_id} в спринте {body.sprint_no} не загрузится")
 
     # все строки задачи в целевом спринте (перенесённые + уже стоявшие там)
-    # сливаются в одну: одна строка на (задача × спринт)
+    # сливаются по команде-исполнителю: одна строка на (задача × спринт × исполнитель);
+    # разные исполнители — разные строки, иначе SP припишется не той команде (048)
     target_rows = [
         it for it in items
         if it.task_id == task_id and (id(it) in moved_ids or it.sprint_no == body.sprint_no)
     ]
-    keep = target_rows[0]
-    merged_assignments: list[dict] = []
-    planned_sp = 0.0
-    has_sp = False
+    by_team: dict[str, list] = {}
     for row in target_rows:
-        if row.planned_sp is not None:
-            planned_sp += row.planned_sp
-            has_sp = True
-        for a in (row.assignments or []):
-            merged_assignments.append({**a, "sprint_no": body.sprint_no})
-    keep.sprint_no = body.sprint_no
-    keep.planned_sp = planned_sp if has_sp else None
-    keep.assignments = merged_assignments  # новый список — JSON-колонка видит изменение
-    if not keep.reason:
-        keep.reason = next((r.reason for r in target_rows if r.reason), "")
-    keep.pinned_sprint = body.sprint_no
-    keep.pinned_engineer_id = body.engineer_id
-    keep.pinned_position = body.position
-    for row in target_rows[1:]:
-        await ctx.session.delete(row)
+        by_team.setdefault(row.team_id or "", []).append(row)
+    for team_rows in by_team.values():
+        keep = team_rows[0]
+        merged_assignments: list[dict] = []
+        planned_sp = 0.0
+        has_sp = False
+        for row in team_rows:
+            if row.planned_sp is not None:
+                planned_sp += row.planned_sp
+                has_sp = True
+            for a in (row.assignments or []):
+                merged_assignments.append({**a, "sprint_no": body.sprint_no})
+        keep.sprint_no = body.sprint_no
+        keep.planned_sp = planned_sp if has_sp else None
+        keep.assignments = merged_assignments  # новый список — JSON-колонка видит изменение
+        if not keep.reason:
+            keep.reason = next((r.reason for r in team_rows if r.reason), "")
+        keep.pinned_sprint = body.sprint_no
+        keep.pinned_engineer_id = body.engineer_id
+        keep.pinned_position = body.position
+        for row in team_rows[1:]:
+            await ctx.session.delete(row)
     await ctx.session.commit()
 
     return {"status": "pinned", "plan_id": plan_id, "task_id": task_id,
