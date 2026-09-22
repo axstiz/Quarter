@@ -912,6 +912,7 @@ async def staffing_suggestions_endpoint(plan_id: str, ctx: Context = Depends(req
     plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
     if not plan_orm:
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
+
     tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     from src.services.optimization import generate_staffing_suggestions
 
@@ -1316,6 +1317,10 @@ async def pin_task(
     plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
     if not plan_orm:
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
+
+    # change 040-QA: спринт пина всегда в границах квартала (0/7 проходили)
+    if not 1 <= body.sprint_no <= SPRINTS_PER_QUARTER:
+        raise HTTPException(status_code=422, detail=f"sprint_no должен быть 1..{SPRINTS_PER_QUARTER}")
 
     tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
     if task_id not in tasks:
