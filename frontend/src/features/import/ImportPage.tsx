@@ -28,8 +28,47 @@ export function ImportPage() {
   const [jobId, setJobId] = useState<string | null>(null)
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [result, setResult] = useState<ConfirmResponse | null>(null)
+  // change 036: очередь файлов — multiple input, загрузка ПОСЛЕДОВАТЕЛЬНО по одному
+  type QueuedFile = { file: File; status: 'waiting' | 'processing' | 'done' | 'failed'; counts?: Record<string, number>; error?: string }
+  const [queue, setQueue] = useState<QueuedFile[]>([])
 
-  const upload = useMutation({ mutationFn: api.uploadFile, onSuccess: (j) => setJobId(j.job_id) })
+  const patch = (name: string, upd: Partial<QueuedFile>) =>
+    setQueue((q) => q.map((f) => (f.file.name === name ? { ...f, ...upd } : f)))
+
+  const enqueue = (files: File[]) => {
+    setQueue((q) => [...q, ...files.map((f) => ({ file: f, status: 'waiting' as const }))])
+    // активный job начинается только когда предыдущий поток завершён (jobId пуст)
+    if (!jobId) {
+      const next = files[0]
+      if (next) {
+        setQueue((q) => q.map((f) => (f.file.name === next.name ? { ...f, status: 'processing' } : f)))
+        upload.mutate(next)
+      }
+    }
+  }
+
+  // завершение активного job'а (confirm/failed) — старт следующего waiting-файла
+  const startNext = () => {
+    setQueue((q) => {
+      const next = q.find((f) => f.status === 'waiting')
+      if (next) {
+        setQueue((cur) => cur.map((f) => (f.file.name === next.file.name ? { ...f, status: 'processing' } : f)))
+        upload.mutate(next.file)
+      }
+      return q
+    })
+  }
+  const upload = useMutation({
+    mutationFn: (file: File) => api.uploadFile(file),
+    onSuccess: (j, file) => {
+      setJobId(j.job_id)
+      patch(file.name, { status: 'processing', error: undefined })
+    },
+    onError: (e, file) => {
+      patch(file.name, { status: 'failed', error: e instanceof Error ? e.message : String(e) })
+      startNext()
+    },
+  })
   const job = useQuery({
     queryKey: ['job', jobId],
     queryFn: () => api.getJob(jobId!),
@@ -48,6 +87,10 @@ export function ImportPage() {
     onSuccess: (r) => {
       setResult(r)
       qc.invalidateQueries()
+      // change 036: помечаем файл done; если очередь не пуста — следующий файл стартует сам
+      setQueue((q) => q.map((f) => (f.status === 'processing' ? { ...f, status: 'done', counts: r.counts } : f)))
+      setJobId(null)
+      startNext()
       toast.success('Данные импортированы')
     },
     onError: (e) => toast.error(errorTitle(e), { description: errorHint(e) }),
@@ -127,7 +170,18 @@ export function ImportPage() {
                 </Button>
               </div>
               <div className="or-divider"><span>или свой файл</span></div>
-              <Dropzone loading={upload.isPending} error={upload.error} onFile={(f) => upload.mutate(f)} />
+              <div style={{ display: 'grid', gap: 'var(--s-2)' }}>
+                {queue.map((f) => (
+                  <div key={f.file.name} style={{ display: 'flex', gap: 'var(--s-3)', alignItems: 'center', fontSize: 'var(--text-sm)' }}>
+                    <span data-done={f.status === 'failed' && undefined}>
+                      {f.status === 'waiting' ? '⏳' : f.status === 'processing' ? '⏳' : f.status === 'done' ? '✅' : '❌'} {f.file.name}
+                    </span>
+                    {f.status === 'done' && f.counts && <span className="muted">{f.counts.tasks ?? 0} задач</span>}
+                    {f.status === 'failed' && f.error && <span style={{ color: 'var(--ink-3)' }}>{f.error}</span>}
+                  </div>
+                ))}
+                <Dropzone loading={upload.isPending} error={upload.error} onFiles={(files) => enqueue(files)} />
+              </div>
             </div>
           ) : (
             <div style={{ display: 'grid', gap: 'var(--s-4)' }}>
@@ -243,7 +297,7 @@ export function ImportPage() {
   )
 }
 
-function Dropzone({ loading, error, onFile }: { loading: boolean; error: Error | null; onFile: (f: File) => void }) {
+function Dropzone({ loading, error, onFiles }: { loading: boolean; error: Error | null; onFiles: (files: File[]) => void }) {
   const input = useRef<HTMLInputElement>(null)
   const [over, setOver] = useState(false)
   return (
@@ -263,8 +317,8 @@ function Dropzone({ loading, error, onFile }: { loading: boolean; error: Error |
         onDrop={(e) => {
           e.preventDefault()
           setOver(false)
-          const f = e.dataTransfer.files[0]
-          if (f) onFile(f)
+          const files = Array.from(e.dataTransfer.files)
+          if (files.length) onFiles(files)
         }}
       >
         {loading ? <Loader2 className="spin" aria-hidden /> : <UploadCloud aria-hidden />}
@@ -273,7 +327,7 @@ function Dropzone({ loading, error, onFile }: { loading: boolean; error: Error |
           xlsx, csv, json · формат датасета распознаётся автоматически
         </span>
       </button>
-      <input ref={input} type="file" accept=".xlsx,.csv,.json" hidden onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+      <input ref={input} type="file" accept=".xlsx,.csv,.json" multiple hidden onChange={(e) => e.target.files?.length && onFiles(Array.from(e.target.files))} />
       {error && <ErrorAlert error={error} />}
     </>
   )

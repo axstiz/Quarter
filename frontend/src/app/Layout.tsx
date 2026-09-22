@@ -3,7 +3,7 @@ import { BarChart3, Building2, CalendarRange, ClipboardCheck, LogOut, Menu, Moon
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { USE_MOCKS } from '@/api/client'
-import { useCurrentPlanId, useFacts, usePlanVersions, useSwitchWorkspace, useWorkspaces } from '@/api/queries'
+import { useCurrentPlanId, useDatasetLoaded, useFacts, usePlanVersions, useSwitchWorkspace, useWorkspaces } from '@/api/queries'
 import { clearAuth, getRole, getWorkspaceId } from '@/api/auth'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Field'
@@ -29,6 +29,8 @@ const TITLES: Record<string, string> = {
   '/data': 'Данные',
   '/workspaces': 'Рабочие пространства',
 }
+
+const gatedPaths = new Set(['/plan', '/sprint', '/team-map', '/metrics'])
 
 export function Layout() {
   const location = useLocation()
@@ -67,6 +69,9 @@ export function Layout() {
 function Sidebar({ open }: { open: boolean }) {
   const [params] = useSearchParams()
   const { theme, toggle } = useTheme()
+  // change 035: датасет загружен? (для серой навигации до импорта)
+  const dsStatus = useDatasetLoaded()
+  const datasetLoaded = Boolean(USE_MOCKS || dsStatus.data?.dataset_loaded)
   const plan = params.get('plan')
   const search = plan ? `?plan=${plan}` : ''
   const workspaces = useWorkspaces()
@@ -82,17 +87,26 @@ function Sidebar({ open }: { open: boolean }) {
         </div>
       </div>
       <nav className="nav">
-        {NAV.map(({ to, label, icon: Icon }) => (
-          <NavLink key={to} to={{ pathname: to, search }} className="nav__item">
-            {({ isActive }) => (
-              <>
-                {isActive && <motion.span layoutId="nav-active" className="nav__active" transition={t.layout} />}
-                <Icon aria-hidden />
-                <span>{label}</span>
-              </>
-            )}
-          </NavLink>
-        ))}
+        {NAV.map(({ to, label, icon: Icon }) => {
+          // change 035: до загрузки датасета плановые страницы серые и неактивны
+          const gated = gatedPaths.has(to) && !datasetLoaded
+          return gated ? (
+            <span key={to} className="nav__item nav__item--disabled" aria-disabled="true" title="Загрузите датасет, чтобы пользоваться планированием">
+              <Icon aria-hidden />
+              <span>{label}</span>
+            </span>
+          ) : (
+            <NavLink key={to} to={{ pathname: to, search }} className="nav__item">
+              {({ isActive }) => (
+                <>
+                  {isActive && datasetLoaded && <motion.span layoutId="nav-active" className="nav__active" transition={t.layout} />}
+                  <Icon aria-hidden />
+                  <span>{label}</span>
+                </>
+              )}
+            </NavLink>
+          )
+        })}
       </nav>
       <div className="sidebar__footer">
         {/* смена компании (021): возврат на онбординг-экран выбора */}

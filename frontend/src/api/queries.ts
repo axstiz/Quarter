@@ -77,6 +77,15 @@ export function useTasks() {
   return useQuery({ queryKey: keys.tasks, queryFn: api.listTasks, staleTime: 5 * 60_000 })
 }
 
+/** change 035: датасет загружен в current workspace? (короткий staleTime, инвализация после confirm) */
+export function useDatasetLoaded() {
+  return useQuery({
+    queryKey: ['dataset-status', getWorkspaceId()],
+    queryFn: api.datasetStatus,
+    staleTime: 10_000,
+  })
+}
+
 export function useDependencies() {
   return useQuery({ queryKey: keys.dependencies, queryFn: api.listDependencies })
 }
@@ -136,6 +145,7 @@ function useInvalidatePlans() {
     Promise.all([
       qc.invalidateQueries({ queryKey: keys.plans }),
       qc.invalidateQueries({ queryKey: ['plan'] }),
+      qc.invalidateQueries({ queryKey: ['dataset-status'] }),
     ])
 }
 

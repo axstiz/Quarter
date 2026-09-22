@@ -130,3 +130,19 @@ async def test_engineer_imported_edit_makes_manual(auths):
         assert eng.skills_declared == "python, sql" and eng.source == "manual"
     async with SessionLocal() as session:
         await _cleanup(session)
+
+
+@pytest.mark.asyncio
+async def test_dataset_status_gate(auth):
+    """change 035: dataset_loaded=false при пустом workspace, true после импорта."""
+    from httpx import ASGITransport, AsyncClient
+    from src.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        st = await client.get("/api/v1/data/status", headers=auth)
+        assert st.status_code == 200
+        assert st.json() == {"dataset_loaded": False, "tasks": 0}
+        await client.post("/api/v1/data/import", headers=auth)
+        st = await client.get("/api/v1/data/status", headers=auth)
+        assert st.json()["dataset_loaded"] is True
+        assert st.json()["tasks"] > 0

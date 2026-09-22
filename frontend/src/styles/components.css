@@ -580,3 +580,6 @@
 
 /* change 038: бейдж «пин» на optimistic чипе */
 .roles__chip-pin { display: inline-flex; align-items: center; padding: 0 5px; border-radius: 999px; font-size: 9px; line-height: 14px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--plan); border: 1px dashed var(--plan); background: var(--surface, #fff); opacity: .9; cursor: help; }
+
+/* change 035: серые пункты навигации до датасета */
+.nav__item--disabled { opacity: .38; filter: grayscale(1); cursor: not-allowed; }

@@ -254,6 +254,18 @@ async def get_plan(plan_id: str, ctx: Context = Depends(require_context)) -> dic
     }
 
 
+@router.get("/data/status")
+async def data_status(ctx: Context = Depends(require_context)) -> dict:
+    """change 035: лёгкий статус «датасет загружен?» для текущего workspace —
+    план/факт/карта закрыты редиректом на /data, пока tasks нет (гейтинг 021)."""
+    from sqlalchemy import func, select
+    from src.db.models import TaskORM
+
+    total = (await ctx.session.execute(select(func.count()).select_from(TaskORM).where(
+        TaskORM.workspace_id == ctx.workspace_id))).scalar_one()
+    return {"dataset_loaded": total > 0, "tasks": int(total)}
+
+
 @router.post("/data/import")
 async def data_import(ctx: Context = Depends(require_permission("import_data"))) -> dict:
     from src.core.config import settings
