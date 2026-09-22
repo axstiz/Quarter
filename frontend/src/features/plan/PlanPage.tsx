@@ -14,6 +14,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Empty, ErrorAlert, errorHint, errorTitle, SkeletonRows } from '@/components/ui/States'
 import { Tabs } from '@/components/ui/Tabs'
 import { versionLabel } from '@/lib/labels'
+import { buildImprovementSummary } from '@/features/plan/planImprovement'
 import { buildPlanModel, isPartial } from '@/lib/planModel'
 import { useParam } from '@/lib/useParam'
 import { LoadView } from './LoadView'
@@ -99,20 +100,19 @@ export function PlanPage() {
       },
     })
 
+  const [improvement, setImprovement] = useState<string | null>(null)
+
   const runOptimize = () =>
     optimize.mutate(undefined, {
       onSuccess: ({ started, job }) => {
         setPlanParam(started.plan_id)
+        setImprovement(buildImprovementSummary(job))
         // change 031: терминальный статус job'а — режим и причина деградации честные
-        const moves = job.staffing_moves?.length ?? 0
-        const modeLabel = started.mode === 'solver' ? 'solver Timefold' : 'эвристика' + (started.report?.degradation_reason ? ` (${started.report.degradation_reason})` : '')
         if (job.status === 'failed') {
           toast.error('Оптимизация не удалась', { description: job.error ?? undefined })
           return
         }
-        toast.success(started.mode === 'solver' ? 'План оптимизирован' : 'План построен эвристикой', {
-          description: `Режим: ${modeLabel}.${moves ? ` Переносов людей: ${moves}.` : ''} Открыта новая версия — откат через селектор версий.`,
-        })
+        return
       },
       onError: (e) => {
         toast.error(errorTitle(e), { description: errorHint(e) })
@@ -198,6 +198,21 @@ export function PlanPage() {
             </Button>
           </div>
         </div>
+
+        {improvement && (
+          <div className="callout" role="status" style={{ position: 'relative', paddingRight: 36 }}>
+            <div className="callout__title">Оптимизация — что улучшилось</div>
+            <p style={{ margin: 0 }}>{improvement}</p>
+            <button
+              type="button"
+              aria-label="Закрыть сводку"
+              onClick={() => setImprovement(null)}
+              style={{ position: 'absolute', top: 8, right: 10, border: 'none', background: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--ink-3)' }}
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {showStaleDataBanner && (
           <div className="callout" data-tone="shift" role="status" style={{ marginBottom: 'var(--s-4)' }}>

@@ -105,14 +105,29 @@ export interface OptimizeJob {
   plan_id: string | null
   report: {
     mode: string
-    before: Record<string, unknown>
-    after: Record<string, unknown>
+    before: Record<string, unknown> & { sprint_sp?: Record<string, number> }
+    after: Record<string, unknown> & { sprint_sp?: Record<string, number> }
     staffing_moves: StaffingMove[]
     score_breakdown: { constraint: string; weight: number }[]
     degradation_reason?: string
+    /** change 041: разбиение per (team, role, sprint) до/после solve */
+    split_by_team_role?: {
+      before: TeamRoleLoad[]
+      after: TeamRoleLoad[]
+    }
   } | null
   staffing_moves: StaffingMove[]
   score: { hard: number; soft: number } | null
+}
+
+/** change 041: строка разбивки per (team, role, sprint) из optimize-отчёта. */
+export interface TeamRoleLoad {
+  team_id: string
+  role: string
+  sprints: Record<string, { sp: number; hours: number }>
+  limit_hours: number
+  within_norm: boolean
+  total_hours: number
 }
 
 // --- workspaces (changes 008/009, UI — change 021) ---

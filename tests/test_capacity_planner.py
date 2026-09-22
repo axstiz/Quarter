@@ -115,3 +115,17 @@ def test_planner_all_tasks_fits():
     plan = _plan_for(tasks)
     assert len([i for s in plan.sprints for i in s.items]) == 1
     assert plan.decisions == []
+
+
+def test_empty_history_explains_not_planned():
+    """change 042: команда без team_history — честная причина в decisions."""
+    from src.services.planner import PlannerInput, generate_plan
+
+    task = Task(task_id="T-NH", team_id="NoHistory", status="ToDo", estimation_sp=5.0,
+                estimated_hh=20.0, role_hours={"Разработчик": 20.0})
+    engineers = [Engineer(engineer_id="E-NH", team_id="NoHistory", role="Разработчик",
+                          capacity_rate=1.0, grade="Middle", skills_declared="")]
+    plan = generate_plan(PlannerInput([task], engineers, [], []))
+    assert not any(i.task_id == "T-NH" for s in plan.sprints for i in s.items), "задача не должна планироваться"
+    expl = [d for d in plan.decisions if d.task_id == "T-NH"]
+    assert expl and "velocity" in expl[0].reason and "capacity" in expl[0].reason, expl[0].reason
