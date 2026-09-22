@@ -47,10 +47,6 @@ export function PlanPage() {
   const optimize = useOptimizePlan(planId ?? '')
   const qc = useQueryClient()
   const [confirmGenerate, setConfirmGenerate] = useState(false)
-  // change 038: оптимистичный слой пинов — {taskId: целевой спринт}; применяется к клону модели
-  // до downstream-расчётов, чип появляется в новой колонке сразу, бейдж «пин» до пересчёта
-  const [pendingMoves, setPendingMoves] = useState<Record<string, number>>({})
-  useEffect(() => { setPendingMoves({}) }, [planId, plan.data?.plan_id])
   // change 034: вуаль «идёт перестройка» — busy весь solve (031 polling держит флаг до терминала)
   const planBusy = Boolean(optimize.isPending || generate.isPending)
   const planBusyStatus = optimize.isPending
@@ -82,22 +78,8 @@ export function PlanPage() {
     }
   }, [plan.error, setPlanParam])
 
-  const model = useMemo(() => {
-    if (!plan.data) return null
-    const base = buildPlanModel(plan.data, tasks.data ?? [])
-    if (!Object.keys(pendingMoves).length) return base
-    // change 038: клон строк затронутых задач с sprint_no = целевой спринт —
-    // SP/часы/колонки пересчитываются downstream как на уже переехавшую задачу
-    const rows = base.sprints.flatMap((s) => s.rows.map((r) => ({ ...r, sprint_no: pendingMoves[r.task_id] ?? r.sprint_no })))
-    const sprints = rows.reduce((acc, r) => {
-      let bucket = acc.find((x) => x.sprint_no === (r.sprint_no ?? 0))
-      if (!bucket) { bucket = { sprint_no: r.sprint_no ?? 0, rows: [] }; acc.push(bucket) }
-      bucket.rows.push(r)
-      return acc
-    }, [] as typeof base.sprints)
-    sprints.sort((a, b) => a.sprint_no - b.sprint_no)
-    return { ...base, sprints }
-  }, [plan.data, tasks.data, pendingMoves])
+  // change 040: пин — немедленное перемещение на сервере (БД+GET); фронт просто перечитывает план
+  const model = useMemo(() => (plan.data ? buildPlanModel(plan.data, tasks.data ?? []) : null), [plan.data, tasks.data])
   const fixedSprints = useMemo(() => new Set(facts.data?.map((f) => f.sprint_no)), [facts.data])
   const factSprintOf = useMemo(() => new Map(facts.data?.flatMap((f) => f.completed_task_ids.map((id) => [id, f.sprint_no] as const))), [facts.data])
   const updatedAtVersion = useMemo(() => versions.data?.at(-1)?.created_at, [versions.data])
@@ -291,9 +273,6 @@ export function PlanPage() {
                 selectedId={taskId}
                 onSelect={openTask}
                 // change 038: оптимистичный слой
-                pendingMoves={pendingMoves}
-                onPendingMove={(taskId, sprintNo) => setPendingMoves((m) => ({ ...m, [taskId]: sprintNo }))}
-                onPendingReset={() => setPendingMoves({})}
               />
             ) : current === 'load' ? (
               <LoadView model={model} />

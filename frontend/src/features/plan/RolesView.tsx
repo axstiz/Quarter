@@ -1,7 +1,7 @@
 import { Check, ChevronDown, RotateCcw } from 'lucide-react'
 import { useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { useEngineers, usePinTask, useRecompute, useTeamDetails, useUnpinAllTasks, useUnpinTask } from '@/api/queries'
+import { useEngineers, usePinTask, useTeamDetails, useUnpinAllTasks, useUnpinTask } from '@/api/queries'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { SearchInput, Select } from '@/components/ui/Field'
@@ -19,10 +19,6 @@ interface Props {
   readOnly: boolean
   selectedId: string | null
   onSelect: (taskId: string) => void
-  // change 038: оптимистичный слой пинов
-  pendingMoves?: Record<string, number>
-  onPendingMove?: (taskId: string, sprintNo: number) => void
-  onPendingReset?: () => void
 }
 
 interface DragState {
@@ -46,18 +42,17 @@ interface HoverCard {
 
 const chipId = (chip: RoleChip) => `${chip.taskId}:${chip.sprintNo}:${chip.part}`
 
-export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, onSelect, pendingMoves = {}, onPendingMove, onPendingReset }: Props) {
+export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, onSelect }: Props) {
   const [team, setTeam] = useParam('team')
   const [q, setQ] = useParam('q')
   const engineers = useEngineers({})
   const pin = usePinTask(planId)
-  const recompute = useRecompute(planId)
   const unpin = useUnpinTask(planId)
   const unpinAll = useUnpinAllTasks(planId)
 
   // Закрепления приходят из плана (pinned_sprint у план-айтемов) — сервер пересобирает план после pin
   const [drag, setDrag] = useState<DragState | null>(null)
-  const [feedback, setFeedback] = useState<{ text: string; error?: boolean; pinnedPending?: boolean } | null>(null)
+  const [feedback, setFeedback] = useState<{ text: string; error?: boolean } | null>(null)
   const [lastMove, setLastMove] = useState<{ chip: RoleChip; from: number; target: number } | null>(null)
   const [failedPins, setFailedPins] = useState<string[]>([])
   const suppressClick = useRef<string | null>(null)
@@ -69,14 +64,6 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
   const pinnedIds = useMemo(
     () =>
       [...new Set([...model.tasks.values()].flatMap((t) => t.rows.filter((r) => r.pinned_sprint != null).map((r) => r.task_id)))].sort(),
-    [model],
-  )
-  // change 032: неприменённые закрепления — пины, чей целевой спринт отличается от текущей расстановки
-  const pendingPins = useMemo(
-    () =>
-      [...model.tasks.values()]
-        .flatMap((t) => t.rows.filter((r) => r.pinned_sprint != null && r.sprint_no !== r.pinned_sprint))
-        .map((r) => r.task_id),
     [model],
   )
   const busy = pin.isPending || unpin.isPending || unpinAll.isPending
@@ -175,12 +162,8 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
     pin.mutate(
       { taskId: current.chip.taskId, sprintNo: target },
       {
-        // change 032/038: пин — намерение без немедленной пересборки;
-        // optimistic слой показывает чип в целевой колонке с бейджем «пин»
-        onSuccess: () => {
-          onPendingMove?.(current.chip.taskId, target)
-          setFeedback({ text: `${current.chip.taskId} закреплена за спринтом ${target} (ожидает пересчёт)`, pinnedPending: true })
-        },
+        // change 040: сервер перемещает задачу немедленно (БД+GET) — refetch покажет чип в целевой колонке
+        onSuccess: () => setFeedback({ text: `${current.chip.taskId} закреплена за спринтом ${target}` }),
         onError: (e) => {
           // 409 (конфликт ёмкости/зависимости) и прочие ошибки: без повторов на ту же цель
           setFailedPins((before) => [...before, `${current.chip.taskId}:${target}`])
@@ -197,7 +180,7 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
     setLastMove(null)
     unpin.mutate(move.chip.taskId, {
       // change 038: снимаем optimistic слой — чип возвращается к серверной раскладке
-      onSuccess: () => { onPendingReset?.(); setFeedback({ text: `${move.chip.taskId} возвращено: закрепление снято` }) },
+      onSuccess: () => setFeedback({ text: `${move.chip.taskId} возвращено: закрепление снято` }),
       onError: (e) => setFeedback({ text: `${move.chip.taskId}: ${errorTitle(e)}`, error: true }),
     })
   }
@@ -215,26 +198,6 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
 
   return (
     <>
-      {!readOnly && pendingPins.length > 0 && (
-        <div
-          role="status"
-          className="banner banner--info"
-          style={{ margin: '0 0 12px', padding: '8px 12px', border: '1px solid var(--color-warning, #c98a00)', borderRadius: 8, background: 'var(--color-warning-bg, #fff8e6)' }}
-        >
-          Есть неприменённых закреплений: {pendingPins.length} — расстановка обновится{' '}
-          <button
-            type="button"
-            onClick={() => recompute.mutate(undefined, {
-              onSuccess: () => setFeedback({ text: 'План пересобран: закрепления применены' }),
-              onError: (e) => setFeedback({ text: errorTitle(e), error: true }),
-            })}
-            style={{ textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', font: 'inherit' }}
-            disabled={recompute.isPending}
-          >
-            {recompute.isPending ? 'пересчитываем…' : 'после «Пересчёта»'}
-          </button>
-        </div>
-      )}
       <div className="toolbar" role="search">
         <SearchInput placeholder="Задача или название" value={q ?? ''} onChange={(event) => setQ(event.target.value)} style={{ width: 220 }} aria-label="Поиск задач" />
         <Select
@@ -359,7 +322,6 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
                                     onMouseLeave={() => setHover(null)}
                                   >
                                     <span className="roles__chip-id">{chip.taskId}</span>
-                                    {pendingMoves[chip.taskId] != null && <span className="roles__chip-pin" title="закреплено (ожидает пересчёт)">пин</span>}
                                     <small>{fmt(chip.hours)} ч{chip.parts > 1 ? ` · ${chip.part}/${chip.parts}` : ''}</small>
                                   </button>
                                 ))}
