@@ -98,6 +98,8 @@ export const api = {
   /** Оптимизация текущей версии плана: solver Timefold, при недоступности сайдкара — эвристика (режим в ответе). */
   optimizePlan: (planId: string) => request<OptimizeStartResponse>('POST', '/plans/optimize', { plan_id: planId }),
   getOptimizeJob: (jobId: string) => request<OptimizeJob>('GET', `/plans/optimize/${jobId}`),
+  /** change 057: активная задача оптимизации workspace (queued/solving) или null */
+  getActiveOptimizeJob: () => request<{ job_id: string | null; status: 'queued' | 'solving' | null; plan_id: string | null }>('GET', '/plans/optimize/active'),
   listFacts: (planId: string) => request<SprintFact[]>('GET', `/plans/${planId}/facts`),
   getWarnings: (planId: string) => request<PlanWarning[]>('GET', `/plans/${planId}/warnings`),
   getDiff: (planId: string) => request<PlanDiff>('GET', `/plans/${planId}/diff`),

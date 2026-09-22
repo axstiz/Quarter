@@ -620,6 +620,21 @@ async def optimize_plan_endpoint(body: dict | None = None,
     }
 
 
+@router.get("/plans/optimize/active")
+async def optimize_active_job(ctx: Context = Depends(require_context)) -> dict:
+    """change 057: текущая активная задача оптимизации workspace (queued/solving).
+
+    UI крутит вуаль «solver работает» по этой ручке независимо от навигации —
+    состояние не привязано к странице, с которой optimize запускали."""
+    job = (await ctx.session.execute(select(OptimizationJobORM).where(
+        OptimizationJobORM.workspace_id == ctx.workspace_id,
+        OptimizationJobORM.status.in_(ACTIVE_JOB_STATUSES),
+    ).order_by(OptimizationJobORM.created_at.desc()))).scalars().first()
+    if job is None:
+        return {"job_id": None, "status": None, "plan_id": None}
+    return {"job_id": job.job_id, "status": job.status, "plan_id": job.plan_id}
+
+
 @router.get("/plans/optimize/{job_id}")
 async def optimize_job_status(job_id: str, ctx: Context = Depends(require_context)) -> dict:
     """Статус job + результат: отчёт до/после, переносы, score-разбивка."""

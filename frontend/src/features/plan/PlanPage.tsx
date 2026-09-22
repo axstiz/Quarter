@@ -6,7 +6,7 @@ import { canEdit, getRole, getWorkspaceId } from '@/api/auth'
 import { ApiError } from '@/api/client'
 import { api } from '@/api/endpoints'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useBusFactor, useCurrentPlanId, useFacts, useGeneratePlan, useOptimizePlan, usePlan, usePlanBusRisk, usePlanVersions, useTasks } from '@/api/queries'
+import { useBusFactor, useCurrentPlanId, useFacts, useGeneratePlan, useOptimizePlan, usePlan, usePlanBusRisk, usePlanVersions, useTasks, useActiveOptimizeJob } from '@/api/queries'
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber'
 import { BusyVeil } from '@/components/ui/BusyVeil'
 import { Button } from '@/components/ui/Button'
@@ -49,13 +49,19 @@ export function PlanPage() {
   const optimize = useOptimizePlan(planId ?? '')
   const qc = useQueryClient()
   const [confirmGenerate, setConfirmGenerate] = useState(false)
+  // change 057: активная задача solver опрашивается глобально — вуаль живёт
+  // и после ухода со страницы плана и возврата (не только пока висит mutation)
+  const activeJob = useActiveOptimizeJob()
+  const solverActive = Boolean(activeJob.data?.job_id)
   // change 034: вуаль «идёт перестройка» — busy весь solve (031 polling держит флаг до терминала)
-  const planBusy = Boolean(optimize.isPending || generate.isPending)
+  const planBusy = Boolean(optimize.isPending || generate.isPending || solverActive)
   const planBusyStatus = optimize.isPending
     ? (optimize.pollStatus === 'queued' ? 'Оптимизация: задача в очереди (solver)…'
       : optimize.pollStatus === 'solving' ? 'Solver перестраивает расстановку…'
         : 'Оптимизация плана…')
-    : generate.isPending ? 'Строим план заново…' : null
+    : solverActive
+      ? (activeJob.data?.status === 'queued' ? 'Оптимизация: задача в очереди (solver)…' : 'Solver перестраивает расстановку…')
+      : generate.isPending ? 'Строим план заново…' : null
   const demoImport = useMutation({
     mutationFn: api.importDemo,
     onSuccess: (r) => {
@@ -194,7 +200,7 @@ export function PlanPage() {
             <Button variant="ghost" icon={<Lightbulb />} onClick={() => { setTaskId(null); setRiskPanel(null); setFitPanel(null); setAdvicePanel('1') }}>
               Советы
             </Button>
-            <Button variant="primary" icon={<Sparkles />} loading={optimize.isPending} disabled={readOnly} onClick={runOptimize}>
+            <Button variant="primary" icon={<Sparkles />} loading={optimize.isPending || solverActive} disabled={readOnly || solverActive} onClick={runOptimize}>
               Оптимизировать
             </Button>
             <Button variant="ghost" icon={<RotateCcw />} loading={generate.isPending} disabled={readOnly} onClick={() => setConfirmGenerate(true)}>

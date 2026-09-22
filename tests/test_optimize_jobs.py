@@ -384,3 +384,30 @@ async def test_plan_shows_executing_team_not_owner(auths, monkeypatch):
         t2 = next(i for i in items if i["task_id"] == "T-2")
         assert t2["team_id"] == "Team-A"
         assert t2["owner_team_id"] == "Team-A"
+
+
+@pytest.mark.asyncio
+async def test_optimize_active_endpoint(auths):
+    """change 057: активный job workspace виден отдельной ручкой; без активных — null."""
+    from src.db.session import SessionLocal
+    auth = auths["editor"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.get("/api/v1/plans/optimize/active", headers=auth)
+        assert r.status_code == 200
+        assert r.json()["job_id"] is None
+
+        async with SessionLocal() as session:
+            job_id = await _setup_job(session, status="solving")
+        r = await ac.get("/api/v1/plans/optimize/active", headers=auth)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["job_id"] == job_id and body["status"] == "solving"
+
+        # завершённый job больше не активен
+        from sqlalchemy import update
+        async with SessionLocal() as session:
+            await session.execute(update(OptimizationJobORM).where(
+                OptimizationJobORM.job_id == job_id).values(status="ready"))
+            await session.commit()
+        r = await ac.get("/api/v1/plans/optimize/active", headers=auth)
+        assert r.json()["job_id"] is None

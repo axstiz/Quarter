@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { getWorkspaceId, setWorkspace } from './auth'
@@ -198,8 +198,29 @@ const OPTIMIZE_POLL_LIMIT_MS = 3_120_000 // 52 мин > arq job_timeout 300 с �
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-export function useOptimizePlan(planId: string) {
+/** change 057: активная задача оптимизации workspace — опрашивается всегда,
+ *  поэтому вуаль «solver работает» живёт и после ухода со страницы и возврата. */
+export function useActiveOptimizeJob() {
   const invalidate = useInvalidatePlans()
+  const wasActive = useRef(false)
+  return useQuery({
+    queryKey: ['optimize-active'],
+    queryFn: api.getActiveOptimizeJob,
+    refetchInterval: (query) => {
+      const active = Boolean(query.state.data?.job_id)
+      if (wasActive.current && !active) {
+        // задача завершилась, пока были на другой странице — план обновился
+        wasActive.current = false
+        invalidate()
+      } else {
+        wasActive.current = active
+      }
+      return active ? OPTIMIZE_POLL_MS : 4000
+    },
+  })
+}
+
+export function useOptimizePlan(planId: string) {  const invalidate = useInvalidatePlans()
   const [pollStatus, setPollStatus] = useState<'queued' | 'solving' | 'ready' | 'failed' | null>(null)
   const mutation = useMutation({
     mutationFn: async () => {
