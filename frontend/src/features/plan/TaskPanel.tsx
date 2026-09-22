@@ -92,7 +92,7 @@ export function TaskPanelContent({ model, planId, taskId, tasksInfo, busFactor, 
         <dd className="mono">{task?.parent_id ?? info?.parent_id ?? '—'}</dd>
       </dl>
 
-      <div className="callout" data-tone={decision ? (DECISION_TONE[decision] === 'plan' ? undefined : DECISION_TONE[decision]) : undefined}>
+      <div className="callout" data-tone={decision && decision !== 'planned' ? DECISION_TONE[decision] : undefined}>
         <div className="callout__title">
           <Info aria-hidden /> Почему такое решение
         </div>

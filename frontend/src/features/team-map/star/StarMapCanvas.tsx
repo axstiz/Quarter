@@ -97,7 +97,7 @@ export const StarMapCanvas = forwardRef<StarMapHandle, Props>(function StarMapCa
       ctx.beginPath()
       ctx.roundRect(x, y, w + 14, h, 6)
       ctx.fillStyle = c().surface
-      ctx.shadowColor = 'rgba(0,0,0,0.18)'
+      ctx.shadowColor = c().labelShadow
       ctx.shadowBlur = 12
       ctx.fill()
       ctx.shadowBlur = 0

@@ -1,5 +1,5 @@
 import { motion } from 'motion/react'
-import { useId } from 'react'
+import { useId, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { t } from '@/lib/motion'
 
@@ -9,8 +9,9 @@ interface Item {
   count?: number
 }
 
-/** Вкладки через ?view= (ссылки сохраняют остальные параметры). Индикатор переезжает между вкладками. */
-export function Tabs({ items, current, param = 'view' }: { items: Item[]; current: string; param?: string }) {
+/** Вкладки через ?view= (ссылки сохраняют остальные параметры). Индикатор переезжает между вкладками.
+ *  right — действие на одной линии с вкладками, прижато вправо. */
+export function Tabs({ items, current, param = 'view', right }: { items: Item[]; current: string; param?: string; right?: ReactNode }) {
   const { pathname, search } = useLocation()
   const id = useId()
   return (
@@ -27,6 +28,7 @@ export function Tabs({ items, current, param = 'view' }: { items: Item[]; curren
           </Link>
         )
       })}
+      {right && <div className="tabs__end">{right}</div>}
     </nav>
   )
 }

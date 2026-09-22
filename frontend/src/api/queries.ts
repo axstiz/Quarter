@@ -249,8 +249,8 @@ export function useCancelTask(planId: string) {
 export function usePinTask(planId: string) {
   const invalidate = useInvalidatePlans()
   return useMutation({
-    mutationFn: ({ taskId, sprintNo }: { taskId: string; sprintNo: number }) =>
-      api.pinTask(planId, taskId, { sprint_no: sprintNo }),
+    mutationFn: ({ taskId, sprintNo, fromSprintNo }: { taskId: string; sprintNo: number; fromSprintNo?: number }) =>
+      api.pinTask(planId, taskId, { sprint_no: sprintNo, from_sprint_no: fromSprintNo }),
     onSuccess: invalidate,
   })
 }

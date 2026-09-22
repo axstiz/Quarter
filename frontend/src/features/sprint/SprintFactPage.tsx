@@ -186,8 +186,10 @@ function FactForm({ planId, sprintNo, tasks, isNext, onDone }: FormProps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const plannedSp = rows.reduce((a, x) => a + (x.step_points_sp ?? 0), 0)
+  // факт закрывает задачу целиком: счёт и отметки — по уникальным задачам, а не по строкам
+  const taskIds = [...new Set(rows.map((x) => x.task_id))]
   const doneSp = rows.filter((x) => done.has(x.task_id)).reduce((a, x) => a + (x.step_points_sp ?? 0), 0)
-  const notDone = rows.filter((x) => !done.has(x.task_id))
+  const notDone = taskIds.filter((id) => !done.has(id))
 
   const toggle = (id: string) =>
     setDone((prev) => {
@@ -234,11 +236,11 @@ function FactForm({ planId, sprintNo, tasks, isNext, onDone }: FormProps) {
                     type="checkbox"
                     aria-label="Отметить все"
                     style={{ accentColor: 'var(--plan)', width: 16, height: 16 }}
-                    checked={done.size === rows.length}
+                    checked={taskIds.length > 0 && done.size === taskIds.length}
                     ref={(el) => {
-                      if (el) el.indeterminate = done.size > 0 && done.size < rows.length
+                      if (el) el.indeterminate = done.size > 0 && done.size < taskIds.length
                     }}
-                    onChange={(e) => setDone(e.target.checked ? new Set(rows.map((x) => x.task_id)) : new Set())}
+                    onChange={(e) => setDone(e.target.checked ? new Set(taskIds) : new Set())}
                   />
                 </th>
                 <th>Ключ</th>
@@ -249,7 +251,7 @@ function FactForm({ planId, sprintNo, tasks, isNext, onDone }: FormProps) {
             </thead>
             <tbody>
               {rows.map((x) => (
-                <tr key={x.task_id} className="is-link" aria-selected={done.has(x.task_id)} onClick={() => toggle(x.task_id)}>
+                <tr key={`${x.task_id}|${x.sprint_no}`} className="is-link" aria-selected={done.has(x.task_id)} onClick={() => toggle(x.task_id)}>
                   <td>
                     <input
                       type="checkbox"
@@ -283,7 +285,7 @@ function FactForm({ planId, sprintNo, tasks, isNext, onDone }: FormProps) {
       {/* Действие всегда на виду: панель прилипает к низу экрана, пока таблица длиннее окна */}
       <div className="fact-bar">
         <span className="tabular">
-          Отмечено <b>{done.size}</b> из {rows.length} · <b>{fmt(doneSp)}</b> из {fmt(plannedSp)} SP
+          Отмечено <b>{done.size}</b> из {taskIds.length} · <b>{fmt(doneSp)}</b> из {fmt(plannedSp)} SP
         </span>
         <Button variant="primary" icon={<CheckCircle2 />} onClick={() => setConfirmOpen(true)}>
           Загрузить факт
@@ -303,7 +305,7 @@ function FactForm({ planId, sprintNo, tasks, isNext, onDone }: FormProps) {
         {done.size === 0 && rows.length > 0 && (
           <div className="callout" data-tone="over" style={{ marginBottom: 'var(--s-3)' }}>
             <div className="callout__title">Не отмечено ни одной задачи</div>
-            <p>Все {rows.length} {plural(rows.length, 'задача', 'задачи', 'задач')} спринта вернутся в планирование. Если вы просто забыли отметить выполненное — нажмите «Отмена».</p>
+            <p>Все {taskIds.length} {plural(taskIds.length, 'задача', 'задачи', 'задач')} спринта вернутся в планирование. Если вы просто забыли отметить выполненное — нажмите «Отмена».</p>
           </div>
         )}
         <ul className="list-plain">
@@ -312,7 +314,7 @@ function FactForm({ planId, sprintNo, tasks, isNext, onDone }: FormProps) {
           </li>
           <li>
             Вернутся в планирование: <strong className="tabular">{notDone.length}</strong>
-            {notDone.length > 0 && <span className="mono muted"> ({notDone.map((x) => x.task_id).join(', ')})</span>}.
+            {notDone.length > 0 && <span className="mono muted"> ({notDone.join(', ')})</span>}.
           </li>
           <li>{sprintNo < 6 ? `Спринты ${sprintNo + 1}–6 будут пересчитаны, появится новая версия плана.` : 'Квартал будет закрыт по факту.'}</li>
         </ul>

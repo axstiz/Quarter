@@ -7,10 +7,10 @@ import type { BusForecastEntry } from '@/api/types'
 
 const SPRINTS = [1, 2, 3, 4, 5, 6]
 
-const LEVEL_LABEL: Record<BusForecastEntry['risk']['level'], { label: string; tone: 'over' | 'shift' | 'plan' }> = {
+const LEVEL_LABEL: Record<BusForecastEntry['risk']['level'], { label: string; tone: 'over' | 'shift' | 'done' }> = {
   high: { label: 'высокий', tone: 'over' },
   medium: { label: 'средний', tone: 'shift' },
-  low: { label: 'низкий', tone: 'plan' },
+  low: { label: 'низкий', tone: 'done' }, // как благополучный Bus Factor в «Компетенциях»
 }
 
 /**

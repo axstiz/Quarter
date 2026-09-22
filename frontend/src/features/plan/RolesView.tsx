@@ -117,14 +117,17 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
 
   const canEdit = !readOnly
 
+  /** Отказ сервера помним по части задачи: отказ одной части не блокирует перенос другой. */
+  const pinKey = (chip: RoleChip, target: number) => `${chip.taskId}:${chip.sprintNo}:${target}`
+
   /** Целевой спринт валиден: внутри квартала, не зафиксирован фактом, и сервер его не отклонял (409). */
   const validTarget = (chip: RoleChip, target: number): boolean =>
-    SPRINT_NUMBERS.includes(target) && !fixedSprints.has(target) && !failedPins.includes(`${chip.taskId}:${target}`)
+    SPRINT_NUMBERS.includes(target) && !fixedSprints.has(target) && !failedPins.includes(pinKey(chip, target))
 
   const invalidReason = (chip: RoleChip, target: number | null): string => {
     if (target == null || !SPRINT_NUMBERS.includes(target)) return 'Вне квартала'
     if (fixedSprints.has(target)) return 'Спринт закрыт по факту'
-    if (failedPins.includes(`${chip.taskId}:${target}`)) return 'сервер отклонил этот перенос, цель заблокирована'
+    if (failedPins.includes(pinKey(chip, target))) return 'сервер отклонил этот перенос, цель заблокирована'
     return 'Перенос недоступен'
   }
 
@@ -158,15 +161,16 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
     if (target === current.chip.sprintNo) return
     suppressClick.current = chipId(current.chip)
     setLastMove({ chip: current.chip, from: current.chip.sprintNo, target })
-    setFeedback({ text: `${current.chip.taskId} · перенос в спринт ${target}…` })
+    const label = current.chip.parts > 1 ? `${current.chip.taskId} (часть из спринта ${current.chip.sprintNo})` : current.chip.taskId
+    setFeedback({ text: `${label} · перенос в спринт ${target}…` })
     pin.mutate(
-      { taskId: current.chip.taskId, sprintNo: target },
+      { taskId: current.chip.taskId, sprintNo: target, fromSprintNo: current.chip.sprintNo },
       {
-        // change 040: сервер перемещает задачу немедленно (БД+GET) — refetch покажет чип в целевой колонке
-        onSuccess: () => setFeedback({ text: `${current.chip.taskId} закреплена за спринтом ${target}` }),
+        // change 047: сервер переносит только часть из исходного спринта — остальные части на местах
+        onSuccess: () => setFeedback({ text: `${label} перенесена в спринт ${target}` }),
         onError: (e) => {
           // 409 (конфликт ёмкости/зависимости) и прочие ошибки: без повторов на ту же цель
-          setFailedPins((before) => [...before, `${current.chip.taskId}:${target}`])
+          setFailedPins((before) => [...before, pinKey(current.chip, target)])
           setLastMove(null)
           setFeedback({ text: `${current.chip.taskId}: ${errorTitle(e)}${errorHint(e) ? ` — ${errorHint(e)}` : ''}`, error: true })
         },
@@ -222,7 +226,7 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
           <span>задачи ролей и носители · раскладка синхронна с «Диаграммой Ганта»</span>
         </div>
         <div className="gantt-feedback" data-error={feedback?.error || undefined}>
-          <span role="status" aria-live="polite">{drag ? 'Отпустите на колонке спринта' : feedback?.text ?? (readOnly ? 'Версия плана только для чтения' : 'Перетащите чип — задача закрепится за другим спринтом (pin: сервер пересоберёт план)')}</span>
+          <span role="status" aria-live="polite">{drag ? 'Отпустите на колонке спринта' : feedback?.text ?? (readOnly ? 'Версия плана только для чтения' : 'Перетащите чип — часть задачи из этой ячейки переедет в другой спринт')}</span>
           {lastMove && feedback && !drag && <button type="button" onClick={revert}>Вернуть</button>}
         </div>
       </div>
@@ -342,9 +346,10 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
             <p className="people__note">
               Часы в ячейке — потребность задач спринта в этой роли; лимит — Σ (80 ч × ставка носителей). Задача без носителей роли
               в своей команде уходит команде с наибольшим свободным лимитом (пунктир — заём); если носителей роли нет во всей компании,
-              в команде задачи красная метка — «виртуальный держатель». Перетаскивание закрепляет задачу за спринтом (pin): сервер
-              пересобирает план на этой же версии, перенос меняет спринт задачи целиком (вместе с SP и остальными ролями), не носителя
-              роли; раскладка совпадает с «Диаграммой Ганта» и видна при пересчёте.
+              в команде задачи красная метка — «виртуальный держатель». Перетаскивание переносит часть задачи из этой ячейки
+              в другой спринт и закрепляет её там: SP и часы всех ролей этой части едут вместе с ней, остальные части задачи
+              остаются на своих спринтах. Меняется спринт части, не носитель роли; раскладка совпадает с «Диаграммой Ганта».
+              «Вернуть» снимает закрепление задачи целиком.
             </p>
           </div>
         </div>
@@ -366,7 +371,7 @@ export function RolesView({ model, planId, fixedSprints, readOnly, selectedId, o
             {hover.chip.decision === 'done_actual' ? 'Выполнено по факту' : 'Запланировано'}
             {hover.chip.loan && ` · заём из команды ${hover.chip.taskTeamId}`}
           </div>
-            <div className="people__card-hint">Нажмите, чтобы открыть карточку задачи{!readOnly && hover.chip.decision !== 'done_actual' ? '; перетащите — закрепить за другим спринтом (pin)' : ''}</div>
+            <div className="people__card-hint">Нажмите, чтобы открыть карточку задачи{!readOnly && hover.chip.decision !== 'done_actual' ? '; перетащите — перенести эту часть в другой спринт' : ''}</div>
         </div>,
         document.body,
       )}

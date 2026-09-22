@@ -1,6 +1,6 @@
 import { Maximize2, Minus, Plus, Search } from 'lucide-react'
 import { motion } from 'motion/react'
-import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import type { BusFactorReport, Engineer } from '@/api/types'
 import { Button } from '@/components/ui/Button'
 import { Checkbox, Select } from '@/components/ui/Field'
@@ -9,6 +9,7 @@ import { t } from '@/lib/motion'
 import { useParam } from '@/lib/useParam'
 import { buildStarGraph, personId, type StarGraph } from './model'
 import { layoutStarGraph } from './layout'
+import { readMapColors } from './palette'
 import { StarMapCanvas, type Lens, type StarMapHandle } from './StarMapCanvas'
 
 const LENSES: { value: Lens; label: string; hint: string }[] = [
@@ -227,6 +228,10 @@ function NodeSearch({ graph, onChoose }: { graph: StarGraph; onChoose: (node: st
 }
 
 function Legend({ lens, defaultOpen }: { lens: Lens; defaultOpen: boolean }) {
+  // цвета легенды — те же, что у канваса, и следуют за темой
+  useThemeKey()
+  const colors = readMapColors()
+  const lg = (color: string) => ({ '--lg-c': color }) as CSSProperties
   return (
     <details className="starmap__legend" open={defaultOpen || undefined}>
       <summary>Как читать</summary>
@@ -239,17 +244,17 @@ function Legend({ lens, defaultOpen }: { lens: Lens; defaultOpen: boolean }) {
         </li>
         {lens === 'roles' && (
           <li>
-            <i className="lg lg--role" /> роль · размер — задачи плана
+            <i className="lg lg--role" style={lg(colors.role)} /> роль · размер — задачи плана
           </li>
         )}
         {lens === 'skills' && (
           <li>
-            <i className="lg lg--skill" /> навык · размер — носители
+            <i className="lg lg--skill" style={lg(colors.skill)} /> навык · размер — носители
           </li>
         )}
         {lens !== 'skills' && (
           <li>
-            <i className="lg lg--risk" /> {lens === 'roles' ? 'роль на одном человеке' : 'единственный носитель роли'}
+            <i className="lg lg--risk" style={lg(colors.risk)} /> {lens === 'roles' ? 'роль на одном человеке' : 'единственный носитель роли'}
           </li>
         )}
         <li>
@@ -264,6 +269,19 @@ function Legend({ lens, defaultOpen }: { lens: Lens; defaultOpen: boolean }) {
   )
 }
 
+/** Меняется при смене темы (атрибут data-theme или системная) — перерисовка потребителя. */
+function useThemeKey() {
+  return useSyncExternalStore(
+    (cb) => {
+      const mo = new MutationObserver(cb)
+      mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+      const mq = matchMedia('(prefers-color-scheme: dark)')
+      mq.addEventListener('change', cb)
+      return () => { mo.disconnect(); mq.removeEventListener('change', cb) }
+    },
+    () => `${document.documentElement.dataset.theme ?? ''}:${matchMedia('(prefers-color-scheme: dark)').matches}`,
+  )
+}
 
 function useMediaQuery(query: string) {
   return useSyncExternalStore(

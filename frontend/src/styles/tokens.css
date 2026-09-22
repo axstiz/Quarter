@@ -1,6 +1,7 @@
 /*
  * Токены. Названия — по смыслу в продукте: paper/sheet/well — поверхности ведомости,
- * plan — единственный акцент, done/shift/over/pending — статусы решений планировщика.
+ * plan — единственный акцент интерфейса (кнопки, вкладки, фокус), не статус;
+ * done/shift/over/pending/fact — статусы решений планировщика (planned — зелёный done, факт — серый fact).
  */
 :root {
   --font-ui: 'Onest', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -77,6 +78,9 @@
   --over-soft: rgba(200, 50, 59, 0.1);
   --pending: #ad4710;
   --pending-soft: rgba(214, 102, 36, 0.12);
+  /* Выполнено по факту — нейтральный серый; на ink-3/press, поэтому работает в обеих темах */
+  --fact: var(--ink-3);
+  --fact-soft: var(--press);
 
   --shadow-lift: 0 0 0 1px rgba(22, 24, 29, 0.06), 0 8px 24px -6px rgba(22, 24, 29, 0.16), 0 2px 6px rgba(22, 24, 29, 0.06);
   --focus-ring: 0 0 0 2px var(--paper), 0 0 0 4px var(--plan);
