@@ -406,8 +406,9 @@ async def load_facts(plan_id: str, sprint_no: int, body: dict,
     plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
     if not plan_orm:
         raise HTTPException(status_code=404, detail="план не найден")
+    chain_ids = await _plan_chain_ids(ctx.session, plan_id)
     exists = (await ctx.session.execute(select(SprintFactORM).where(
-        SprintFactORM.plan_id == plan_id, SprintFactORM.sprint_no == sprint_no))).scalar_one_or_none()
+        SprintFactORM.plan_id.in_(chain_ids), SprintFactORM.sprint_no == sprint_no))).scalar_one_or_none()
     if exists:
         raise HTTPException(status_code=409, detail="факт этого спринта уже загружен")
 
@@ -443,7 +444,7 @@ async def _recompute_plan_version(session, plan_id: str, after_sprint: int, work
     current_items = (await session.execute(select(PlanItemORM).where(
         PlanItemORM.plan_id == plan_id))).scalars().all()
     facts = (await session.execute(select(SprintFactORM).where(
-        SprintFactORM.plan_id == plan_id))).scalars().all()
+        SprintFactORM.plan_id.in_(await _plan_chain_ids(session, plan_id))))).scalars().all()
     done_ids: set[str] = {str(x) for f in facts for x in (f.completed_task_ids or [])}
     # выполненные задачи также те, что в данных уже Done
     done_ids |= {t.task_id for t in tasks.values() if t.status == "Done"}
@@ -691,7 +692,7 @@ async def plan_warnings(plan_id: str, ctx: Context = Depends(require_context)) -
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
     items = await get_plan_items(ctx.session, plan_id)
     plan_before = _plan_from_orm(plan_id, items)
-    facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id == plan_id))).scalars().all()
+    facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id.in_(await _plan_chain_ids(ctx.session, plan_id))))).scalars().all()
     done_task_ids: set[str] = set()
     for f in facts:
         done_task_ids.update(str(x) for x in (f.completed_task_ids or []))
@@ -725,7 +726,7 @@ async def plan_diff(plan_id: str, ctx: Context = Depends(require_context)) -> di
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
     items = await get_plan_items(ctx.session, plan_id)
     plan_before = _plan_from_orm(plan_id, items)
-    facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id == plan_id))).scalars().all()
+    facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id.in_(await _plan_chain_ids(ctx.session, plan_id))))).scalars().all()
     done_task_ids = {tid for f in facts for tid in (f.completed_task_ids or [])}
     child = await _latest_child_orm(ctx.session, plan_id)
     if child is not None:
@@ -750,7 +751,7 @@ async def plan_metrics(plan_id: str, ctx: Context = Depends(require_context)) ->
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
     items = await get_plan_items(ctx.session, plan_id)
     plan = _plan_from_orm(plan_id, items)
-    facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id == plan_id))).scalars().all()
+    facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id.in_(await _plan_chain_ids(ctx.session, plan_id))))).scalars().all()
     # факты считаются по всей цепочке версий (первоначальные спринты считаются
     # в знаменателе SP: спринты до пересчёта — их факт игнорируем уже не нужно)
     initial = await _initial_plan_for(ctx.session, plan)
@@ -790,6 +791,20 @@ async def _initial_plan_for(session, plan: Plan) -> Plan:
             return _plan_from_orm(cur_id, items)
         seen.add(cur_orm.parent_plan_id)
         cur_id = cur_orm.parent_plan_id
+
+
+async def _plan_chain_ids(session, plan_id: str) -> set[str]:
+    """Все версии цепочки (текущая → root): факты спринтов привязаны к той версии,
+    на которой их загрузили, а статистика смотрит на любую версию цепочки (047)."""
+    chain_ids = {plan_id}
+    cur = plan_id
+    while True:
+        orm = await get_plan_orm(session, cur)
+        if not orm or not orm.parent_plan_id or orm.parent_plan_id in chain_ids:
+            break
+        chain_ids.add(orm.parent_plan_id)
+        cur = orm.parent_plan_id
+    return chain_ids
 
 
 @router.get("/plans/{plan_id}/tasks/{task_id}/explanation")
@@ -880,7 +895,7 @@ async def optimization_report_endpoint(plan_id: str, ctx: Context = Depends(requ
     items = await get_plan_items(ctx.session, plan_id)
     plan = _plan_from_orm(plan_id, items)
     tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
-    facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id == plan_id))).scalars().all()
+    facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id.in_(await _plan_chain_ids(ctx.session, plan_id))))).scalars().all()
     initial = await _initial_plan_for(ctx.session, plan)
     planned_sp_by_sprint = {s.sprint_no: sum(i.step_points_sp or 0.0 for i in s.items) for s in initial.sprints}
     done_sp_by_sprint = {f.sprint_no: f.completed_sp for f in facts}
@@ -941,7 +956,7 @@ async def advice_endpoint(plan_id: str, comment: str | None = None,
     items = await get_plan_items(ctx.session, plan_id)
     plan = _plan_from_orm(plan_id, items)
     tasks, engineers, history, deps = await load_world(ctx.session, workspace_id=ctx.workspace_id)
-    facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id == plan_id))).scalars().all()
+    facts = (await ctx.session.execute(select(SprintFactORM).where(SprintFactORM.plan_id.in_(await _plan_chain_ids(ctx.session, plan_id))))).scalars().all()
     initial = await _initial_plan_for(ctx.session, plan)
     planned_sp_by_sprint = {s.sprint_no: sum(i.step_points_sp or 0.0 for i in s.items) for s in initial.sprints}
     done_sp_by_sprint = {f.sprint_no: f.completed_sp for f in facts}
@@ -1114,14 +1129,7 @@ async def facts_list(plan_id: str, ctx: Context = Depends(require_context)) -> l
     plan_orm = await get_plan_orm(ctx.session, plan_id, ctx.workspace_id)
     if not plan_orm:
         raise HTTPException(status_code=404, detail=f"план {plan_id} не найден")
-    chain_ids = {plan_id}
-    cur = plan_id
-    while True:
-        orm = await get_plan_orm(ctx.session, cur)
-        if not orm or not orm.parent_plan_id or orm.parent_plan_id in chain_ids:
-            break
-        chain_ids.add(orm.parent_plan_id)
-        cur = orm.parent_plan_id
+    chain_ids = await _plan_chain_ids(ctx.session, plan_id)
     facts = (await ctx.session.execute(select(SprintFactORM).where(
         SprintFactORM.plan_id.in_(chain_ids)))).scalars().all()
     return [{

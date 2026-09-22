@@ -546,6 +546,18 @@ async def apply_draft(session, workspace_id: str, source_plan_id: str, draft: di
 
     partial_hh: dict[str, float] = draft.get("partial_hh") or {}
     partial_noted: set[str] = set()
+    # change 047: выполненные по факту задачи (done_actual) переносятся в новую
+    # версию — иначе после оптимизации они пропадают с ганта и из «ролей по задачам»
+    source_items = (await session.execute(select(PlanItemORM).where(
+        PlanItemORM.plan_id == source_plan_id))).scalars().all()
+    for it in source_items:
+        if it.decision == PlanDecision.done_actual.value:
+            session.add(PlanItemORM(
+                plan_id=new_orm.plan_id, task_id=it.task_id,
+                team_id=it.team_id, decision=PlanDecision.done_actual.value,
+                sprint_no=it.sprint_no, reason=it.reason,
+                planned_sp=it.planned_sp, assignments=it.assignments,
+            ))
     for it in draft["items"]:
         reason = f"{reason_prefix}; задача {it['task_id']} в спринт {it['sprint_no']}"
         if it.get("note"):
