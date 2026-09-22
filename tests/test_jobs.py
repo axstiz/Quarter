@@ -54,8 +54,7 @@ async def test_job_persistence_after_simulation(auth):
         )
         job_id = resp.json()["job_id"]
 
-        # второй "воркер": чистая сессия, без памяти процесса
-        session_mod.SessionLocal.kw = {}
+        # второй "воркер": чистая сессия (БД — истина, память процесса больше не смотрим)
         async with session_mod.SessionLocal() as s:
             job = await get_job_db(s, job_id)
             assert job is not None

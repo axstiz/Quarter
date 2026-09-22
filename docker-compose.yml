@@ -44,6 +44,8 @@ services:
     volumes:
       # change 030: русский CA Минцифры для LLM-вызовов нормализации из воркера
       - /etc/nixos/certs:/etc/nixos/certs:ro
+      # change 037: общий tmp — файлы, загруженные api
+      - jobs-tmp:/tmp/planner-uploads
 
   # change 018: solver-сайдкар Timefold — только в профиле optimizer
   # (docker compose --profile optimizer up)
@@ -91,6 +93,8 @@ services:
       # change 030: русский CA Минцифры на хосте — до LLM-вызовов SDK из контейнера
       # (GIGACHAT_CA_BUNDLE в .env указывает на тот же путь)
       - /etc/nixos/certs:/etc/nixos/certs:ro
+      # change 037: общий tmp для upload-файлов — воркер читает файлы api
+      - jobs-tmp:/tmp/planner-uploads
     restart: unless-stopped
 
   frontend:
@@ -105,3 +109,4 @@ services:
 
 volumes:
   pgdata:
+  jobs-tmp:

@@ -1345,34 +1345,51 @@ async def pin_task(
         if not eng:
             raise HTTPException(status_code=404, detail=f"инженер {body.engineer_id} не найден")
 
-    # change 032: пин — намерение без немедленной пересборки версии.
-    # Применён к раскладке будет при POST /recompute или авто-пересчёте
-    # после факта (generate_plan(..., pins=...), pre-occupancy по спеке 016)
+    # change 039: пин применяется немедленно к ДАННЫМ задачи (перемещение —
+    # фиксация данных), без пересборки остального плана (032).
+    # 409 по ёмкости инженера в целевом спринте — до записи.
     item = next((it for it in items if it.task_id == task_id), None)
-    if item is not None:
-        item.pinned_sprint = body.sprint_no
-        item.pinned_engineer_id = body.engineer_id
-        item.pinned_position = body.position
-    else:
-        # задача вне текущей раскладки: создаём deferred-запись (postponed),
-        # которую pins-сборка при пересчёте возьмёт в план (change 032)
-        ctx.session.add(PlanItemORM(
-            plan_id=plan_id,
-            workspace_id=ctx.workspace_id,
-            task_id=task_id,
-            team_id=tasks[task_id].team_id if task_id in tasks else "",
-            decision=PlanDecision.postponed.value,
-            sprint_no=None,
-            reason="закреплено (ожидает пересчёт)",
-            pinned_sprint=body.sprint_no,
-            pinned_engineer_id=body.engineer_id,
-            pinned_position=body.position,
-        ))
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"задача {task_id} не входит в план (закреплять можно плановые)")
+    if item.decision == PlanDecision.done_actual.value:
+        raise HTTPException(status_code=409, detail="задача закрыта фактом — закреплять нельзя")
+
+    if body.engineer_id:
+        # лёгкая проверка ёмкости: часы КОНКРЕТНОГО инженера в перемещаемых строках
+        # + его загрузка в целевом спринте другими задачами > лимит → 409
+        need = sum(
+            (a.get("hours") or 0.0)
+            for it2 in items if it2.task_id == task_id
+            for a in (it2.assignments or [])
+            if a.get("engineer_id") == body.engineer_id
+        )
+        limit = 80.0 * next(
+            (e.capacity_rate for e in engineers if e.engineer_id == body.engineer_id), 1.0)
+        placed = sum(
+            (a.get("hours") or 0.0)
+            for it2 in items
+            if it2.task_id != task_id and (it2.pinned_sprint == body.sprint_no or it2.sprint_no == body.sprint_no)
+            for a in (it2.assignments or [])
+            if a.get("engineer_id") == body.engineer_id
+        )
+        if placed + need > limit + 1e-9:
+            raise HTTPException(
+                status_code=409,
+                detail=f"нужно {need:.0f} ч, свободно {max(0.0, limit - placed):.0f} ч — инженер {body.engineer_id} в спринте {body.sprint_no} не загрузится")
+
+    moved_rows = [it for it in items if it.task_id == task_id]
+    for row in moved_rows:
+        row.sprint_no = body.sprint_no
+        for a in (row.assignments or []):
+            a["sprint_no"] = body.sprint_no
+        row.pinned_sprint = body.sprint_no
+        row.pinned_engineer_id = body.engineer_id
+        row.pinned_position = body.position
     await ctx.session.commit()
 
     return {"status": "pinned", "plan_id": plan_id, "task_id": task_id,
-            "sprint_no": body.sprint_no, "applied": False,
-            "message": "закреплено (ожидает пересчёт)"}
+            "sprint_no": body.sprint_no, "applied": True,
+            "message": "закреплено (перемещено немедленно)"}
 
 
 @router.delete("/plans/{plan_id}/tasks/{task_id}/pin")

@@ -217,9 +217,9 @@ async def save_job_db(session, job: UploadJob) -> None:
 
 
 async def get_job_db(session, job_id: str) -> UploadJob | None:
-    if job_id in UploadJob.JOBS:
-        return UploadJob.JOBS[job_id]
-
+    # change 037-feedback: ВЕДУЩИЙ источник job-состояния — БД (персистентность спеки
+    # 007: job переживает рестарт, воркер и API видят общее состояние).
+    # In-memory был раньше БД и возвращал протухший статот (upload) вместо ready
     from src.db.models import UploadJobORM
     orm = await session.get(UploadJobORM, job_id)
     if not orm:
