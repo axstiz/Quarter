@@ -251,7 +251,7 @@ curl localhost:8000/api/v1/star-map/summary
 
 ## Разработка
 
-Спеки и change-процесс — [openspec/](openspec): `/opsx-propose "идея"` → ревью → `/opsx-apply` → `/opsx-archive`; `openspec validate` перед MR. Коммиты — Conventional Commits: `тип(scope): описание` (`feat/fix/spec/data/docs/refactor/…`). Хуки: `git config core.hooksPath .githooks` (`commit-msg`, `pre-commit`, `pre-push` — validate спеков + воспроизводимость `dataset/`). Подробности — `AGENTS.md`.
+Спеки и change-процесс — [openspec/](openspec). Коммиты — Conventional Commits: `тип(scope): описание` (`feat/fix/spec/data/docs/refactor/…`). Хуки: `git config core.hooksPath .githooks` (`commit-msg`, `pre-commit`, `pre-push` — validate спеков + воспроизводимость `dataset/`). Подробности — `AGENTS.md`.
 
 ## Скриншоты
 
