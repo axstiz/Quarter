@@ -93,6 +93,9 @@ class PinRequest(BaseModel):
     sprint_no: int
     engineer_id: str | None = None
     position: int | None = None
+    # change 047: перенос одной части задачи — только строка из этого спринта;
+    # None — вся задача (прежнее поведение)
+    from_sprint_no: int | None = None
 
 
 class Explanation(BaseModel):
