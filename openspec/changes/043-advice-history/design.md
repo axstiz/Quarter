@@ -1,0 +1,3 @@
+# Design: 043-advice-history
+
+AdviceReportORM по образцу OptimizationJobORM (workspace_id, plan_id, JSON-поля, created_at). POST /plans/{id}/advice сохраняет прогон после формирования ответа (comment теперь в БД — решение лида, спека меняется). GET /advice/history per-plan_id: вычисляем version_label как порядковый номер версии в цепочке parent_plan_id (1=initial, 2=recomputed…). Фронт: react-query useQuery(['advice', planId]) с enabled:false + refetch по кнопке — state глобальный, кэширование не слетает; история — useQuery(['advice-history', planId]). Спека 015 меняется на «комментарий сохраняется» (одно явное решение лида).
