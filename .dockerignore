@@ -1,0 +1,14 @@
+.venv/
+.git/
+.githooks/
+.pytest_cache/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.env.development
+frontend/tests/
+tests/
+docs/
+help/
+openspec/
+*.md

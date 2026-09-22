@@ -1,0 +1,4 @@
+- [x] 1.1 `reset_dataset_tables`: удалять `source != 'manual'` в каждой из 5 таблиц
+- [x] 1.2 `import_dataset`: skip задачи с существующей manual-версией (PK task_id); счётчик tasks учитывает пропуски
+- [x] 1.3 Тест: CRUD manual engineer/задача → повторный импорт → обе записи живы, imported перезагружены
+- [x] 1.4 openspec validate (18/18); pytest (37 passed)

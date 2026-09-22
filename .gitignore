@@ -3,6 +3,16 @@ __pycache__/
 *.pyc
 .openspec-cache/
 node_modules/
+optimizer/target/
+optimizer/dependency-reduced-pom.xml
 
 **.db
 **.db-journal
+
+# Диагностика GigaChat (ключи не коммитим)
+scripts/gigachat_token.py
+
+# Локальные окружения и секреты (Authorization Key GigaChat, ключи контейнеров)
+.env
+.env.*
+!.env.example

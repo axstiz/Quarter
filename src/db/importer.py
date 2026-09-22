@@ -1,26 +1,31 @@
 from __future__ import annotations
 
 import csv
-from datetime import date, timedelta
+import re
+from datetime import date
 from pathlib import Path
 
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import (
-    Base,
     DependencyORM,
     EngineerORM,
-    PlanItemORM,
-    PlanORM,
+    ReferenceValueORM,
     RoleRequirementORM,
-    SprintFactORM,
     TaskORM,
+    TaskRoleHoursORM,
     TeamHistoryORM,
 )
 
 EXCEL_EPOCH = date(1899, 12, 30)
+
+
+def _role_key(role: str) -> str:
+    """Канонический ключ роли: секция часов xlsx даёт машинные колонки
+    («разработчик_java»), секция требований — display-имена («Разработчик Java»);
+    ключ совпадает у обоих (change 052)."""
+    return re.sub(r"[\s_/\-\(\).]+", "", str(role).lower())
 
 FILES = {
     "tasks.csv",
@@ -57,20 +62,38 @@ def read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(fh))
 
 
-async def reset_dataset_tables(session: AsyncSession) -> None:
-    for model in (PlanItemORM, SprintFactORM, PlanORM, RoleRequirementORM,
-                  DependencyORM, EngineerORM, TeamHistoryORM, TaskORM):
-        await session.execute(model.__table__.delete())
+async def reset_dataset_tables(session: AsyncSession, workspace_id: str = "default") -> None:
+    """Повторный импорт очищает только импортные записи текущего workspace,
+    не затирает ручные записи (source == manual, спека data) и другие workspace.
+    Планы и факты сохраняются (спека architecture)."""
+    for model in (RoleRequirementORM, DependencyORM, EngineerORM, TeamHistoryORM, TaskORM, ReferenceValueORM, TaskRoleHoursORM):
+        stmt = model.__table__.delete().where(model.__table__.c.workspace_id == workspace_id)
+        if "source" in model.__table__.c:
+            stmt = stmt.where(model.__table__.c.source != "manual")
+        await session.execute(stmt)
+    await session.flush()
+    session.expire_all()
 
 
-async def import_dataset(session: AsyncSession, dataset_dir: Path) -> dict[str, int]:
+async def import_dataset(session: AsyncSession, dataset_dir: Path, workspace_id: str = "default") -> dict[str, int]:
     counts: dict[str, int] = {}
     missing = FILES - {p.name for p in dataset_dir.iterdir()}
     if missing:
         raise FileNotFoundError(f"dataset не полный: {missing}")
 
-    for i, row in enumerate(read_csv(dataset_dir / "tasks.csv")):
+    existing_ids = {
+        r.task_id for r in (
+            await session.execute(select(TaskORM).where(TaskORM.workspace_id == workspace_id))
+        ).scalars().all()
+    }
+    tasks_rows = read_csv(dataset_dir / "tasks.csv")
+    req_rows = read_csv(dataset_dir / "task_role_requirements.csv")
+    dep_rows = read_csv(dataset_dir / "task_dependencies.csv")
+    for i, row in enumerate(tasks_rows):
+        if row["task_id"] in existing_ids:
+            continue
         session.add(TaskORM(
+            workspace_id=workspace_id,
             task_id=row["task_id"],
             parent_id=row.get("parent_id") or None,
             team_id=row.get("team_id", ""),
@@ -81,32 +104,69 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path) -> dict[str, 
             spent_time=_f(row.get("spent_time", "")),
             priority=(10 if row.get("planned_in_sprint", "") == "Да" else 100 + i),
             planned_in_sprint=row.get("planned_in_sprint", "") == "Да",
+            planned_start=_date(row.get("planned_start", "")),
+            planned_end=_date(row.get("planned_end", "")),
+            actual_start=_date(row.get("actual_start", "")),
+            actual_end=_date(row.get("actual_end", "")),
         ))
-    counts["tasks"] = len(read_csv(dataset_dir / "tasks.csv"))
+
+    # Политика автодополнения: задача, упомянутая в сметах/зависимостях,
+    # но отсутствующая в списке задач, считается выполненной (Done) —
+    # сметы по ней остаются как историческая справка, в планирование не входит.
+    known = {r["task_id"] for r in tasks_rows} | existing_ids
+    referenced = (
+        {r["task_id"] for r in req_rows}
+        | {r["blocking_task_id"] for r in dep_rows}
+        | {r["blocked_task_id"] for r in dep_rows}
+    )
+    orphans = sorted(t for t in referenced - known if t)
+    for tid in orphans:
+        session.add(TaskORM(
+            workspace_id=workspace_id,
+            task_id=tid,
+            team_id="",
+            status="Done",
+            summary=f"(задача {tid} отсутствует в списке; считается выполненной)",
+        ))
+    counts["tasks"] = len(tasks_rows) - len(existing_ids & {r["task_id"] for r in tasks_rows})
+    if orphans:
+        counts["tasks_auto_done"] = len(orphans)
+
+    # FK task_role_requirements → tasks: сортировка unit-of-work между мапперами
+    # без relationship не гарантирована — сбрасываем задачи до требований явно.
+    await session.flush()
 
     seen_deps = set()
-    for row in read_csv(dataset_dir / "task_dependencies.csv"):
+    for row in dep_rows:
         key = (row["blocking_task_id"], row["blocked_task_id"])
         if key in seen_deps or not all(key):
             continue
         seen_deps.add(key)
         session.add(DependencyORM(
+            workspace_id=workspace_id,
             blocking_task_id=row["blocking_task_id"],
             blocked_task_id=row["blocked_task_id"],
             dependency_type=row.get("dependency_type", ""),
         ))
     counts["dependencies"] = len(seen_deps)
 
-    for row in read_csv(dataset_dir / "task_role_requirements.csv"):
+    # задачи-сироты теперь существуют (Done), но фильтр сохраняем на не-осиротевшие
+    # ссылки (кейсы, где сироты не создавались) — не ослаблять инвариант
+    valid_task_ids = {r["task_id"] for r in tasks_rows} | existing_ids | set(orphans)
+    for row in req_rows:
+        if row["task_id"] not in valid_task_ids:
+            continue
         session.add(RoleRequirementORM(
+            workspace_id=workspace_id,
             task_id=row["task_id"],
             role=row["role"],
             hours=_f(row.get("hours", "")),
         ))
-    counts["role_requirements"] = len(read_csv(dataset_dir / "task_role_requirements.csv"))
+    counts["role_requirements"] = len(req_rows)
 
     for row in read_csv(dataset_dir / "engineers_profiles.csv"):
         session.add(EngineerORM(
+            workspace_id=workspace_id,
             engineer_id=row["engineer_id"],
             team_id=row["team_id"],
             role=row["role"],
@@ -122,6 +182,7 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path) -> dict[str, 
         if not d:
             continue
         session.add(TeamHistoryORM(
+            workspace_id=workspace_id,
             snapshot_date=d,
             team_id=row["team_id"],
             velocity_achieved=_f(row.get("velocity_achieved", "")),
@@ -129,6 +190,40 @@ async def import_dataset(session: AsyncSession, dataset_dir: Path) -> dict[str, 
         ))
         n_hist += 1
     counts["team_history"] = n_hist
+
+    ref_rows = read_csv(dataset_dir / "reference_values.csv")
+    for row in ref_rows:
+        session.add(ReferenceValueORM(
+            workspace_id=workspace_id,
+            category=row.get("value_type", row.get("category", "")),
+            value=row.get("value", ""),
+        ))
+    counts["reference_values"] = len(ref_rows)
+
+    hours_rows = read_csv(dataset_dir / "task_role_hours.csv")
+    # change 052: машинные имена колонок секции часов → display-имена из требований
+    await session.flush()
+    display_roles = (await session.execute(select(RoleRequirementORM.role).where(
+        RoleRequirementORM.workspace_id == workspace_id))).scalars().all()
+    role_display: dict[str, str] = {}
+    for disp in display_roles:
+        role_display.setdefault(_role_key(disp), disp)
+    hours_count = 0
+    for row in hours_rows:
+        tid = row.get("task_id", "")
+        for col, val_str in row.items():
+            if col in ("task_id", "исходное_время"):
+                continue
+            val = _f(val_str)
+            if val > 0:
+                session.add(TaskRoleHoursORM(
+                    workspace_id=workspace_id,
+                    task_id=tid,
+                    role=role_display.get(_role_key(col), col),
+                    hours=val,
+                ))
+                hours_count += 1
+    counts["task_role_hours"] = hours_count
 
     await session.commit()
     return counts
